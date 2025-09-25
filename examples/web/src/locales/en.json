@@ -1,0 +1,82 @@
+{
+  "app": {
+    "title": "GoTask Task Management System"
+  },
+  "task": {
+    "tree": "Task Tree",
+    "detail": "Task Detail",
+    "createDemo": "Create Demo Task",
+    "refresh": "Refresh",
+    "restart": "Restart",
+    "stop": "Stop",
+    "stopTask": "Stop Task",
+    "noData": "No task data available",
+    "selectTask": "Please select a task to view details",
+    "total": "Total {{count}} tasks"
+  },
+  "table": {
+    "owner": "Owner",
+    "taskId": "Task ID",
+    "type": "Type",
+    "state": "State",
+    "startTime": "Start Time",
+    "endTime": "End Time",
+    "duration": "Duration",
+    "retryCount": "Retry Count",
+    "startReason": "Start Reason",
+    "stopReason": "Stop Reason",
+    "actions": "Actions"
+  },
+  "taskType": {
+    "task": "Task",
+    "job": "Job",
+    "work": "Work",
+    "channel": "Channel"
+  },
+  "taskState": {
+    "init": "Initializing",
+    "starting": "Starting",
+    "started": "Started",
+    "running": "Running",
+    "going": "Going",
+    "disposing": "Disposing",
+    "disposed": "Disposed"
+  },
+  "taskDetail": {
+    "taskId": "Task ID",
+    "taskType": "Task Type",
+    "ownerType": "Owner Type",
+    "taskState": "Task State",
+    "taskLevel": "Task Level",
+    "retryCount": "Retry Count",
+    "startTime": "Start Time",
+    "duration": "Duration",
+    "startReason": "Start Reason",
+    "stopReason": "Stop Reason",
+    "parentTaskId": "Parent Task ID",
+    "childTaskCount": "Child Task Count",
+    "description": "Description"
+  },
+  "message": {
+    "getTaskTreeFailed": "Failed to get task tree",
+    "createDemoTaskSuccess": "Demo task created successfully",
+    "createDemoTaskFailed": "Failed to create demo task",
+    "taskRestarted": "Task restarted",
+    "restartTaskFailed": "Failed to restart task",
+    "taskStopped": "Task stopped",
+    "stopTaskFailed": "Failed to stop task"
+  },
+  "language": {
+    "switch": "Switch Language",
+    "chinese": "中文",
+    "english": "English"
+  },
+  "history": {
+    "title": "Task History",
+    "refresh": "Refresh",
+    "view": "View",
+    "startDate": "Start Date",
+    "endDate": "End Date",
+    "total": "Total {{count}} records"
+  }
+}

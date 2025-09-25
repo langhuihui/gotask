@@ -491,6 +491,10 @@ func (task *Task) GetRetryCount() int {
 	return task.retry.RetryCount
 }
 
+func (task *Task) GetMaxRetry() int {
+	return task.retry.MaxRetry
+}
+
 func (task *Task) run(handler func() error) {
 	var err error
 	defer func() {

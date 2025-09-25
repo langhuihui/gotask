@@ -1,4 +1,6 @@
-package task
+package main
+
+import . "github.com/langhuihui/gotask"
 
 // BuildTaskTree 构建任务树（参考 monibuca 的 TaskTree 方法）
 func BuildTaskTree(root ITask) *TaskInfo {
@@ -20,7 +22,7 @@ func BuildTaskTree(root ITask) *TaskInfo {
 			Level:            uint32(m.GetLevel()),
 			EventLoopRunning: false,
 			RetryCount:       t.GetRetryCount(),
-			MaxRetry:         t.retry.MaxRetry,
+			MaxRetry:         t.GetMaxRetry(),
 		}
 
 		if m.IsStopped() {
@@ -52,19 +54,20 @@ func BuildTaskTree(root ITask) *TaskInfo {
 
 // GetTaskInfo 获取任务信息（简化版本）
 func GetTaskInfo(task ITask) *TaskInfo {
+	t := task.GetTask()
 	info := &TaskInfo{
 		ID:               task.GetTaskID(),
 		Type:             task.GetTaskType(),
 		OwnerType:        task.GetOwnerType(),
 		State:            task.GetState(),
 		Level:            uint32(task.GetLevel()),
-		StartTime:        task.GetTask().StartTime,
-		StartReason:      task.GetTask().StartReason,
+		StartTime:        t.StartTime,
+		StartReason:      t.StartReason,
 		Descriptions:     task.GetDescriptions(),
-		Pointer:          uint64(task.GetTask().GetTaskPointer()),
+		Pointer:          uint64(t.GetTaskPointer()),
 		EventLoopRunning: false,
-		RetryCount:       task.GetTask().GetRetryCount(),
-		MaxRetry:         task.GetTask().retry.MaxRetry,
+		RetryCount:       t.GetRetryCount(),
+		MaxRetry:         t.GetMaxRetry(),
 	}
 
 	if task.IsStopped() {
@@ -97,7 +100,7 @@ func FlattenTaskTree(tree *TaskInfo) []*TaskInfo {
 		// 按 ID 排序
 		sortedNodes := make([]*TaskInfo, len(nodes))
 		copy(sortedNodes, nodes)
-		
+
 		// 简单的冒泡排序
 		for i := 0; i < len(sortedNodes)-1; i++ {
 			for j := 0; j < len(sortedNodes)-i-1; j++ {

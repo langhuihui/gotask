@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { TaskInfo, TaskTree, TaskHistory, TaskStats } from '../types/task';
+import type { TaskInfo, TaskHistory, TaskStats } from '../types/task';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api';
 
@@ -10,7 +10,7 @@ const api = axios.create({
 
 export const taskApi = {
   // 获取任务树
-  getTaskTree: async (): Promise<TaskTree> => {
+  getTaskTree: async (): Promise<TaskInfo> => {
     const response = await api.get('/tasks/tree');
     return response.data;
   },

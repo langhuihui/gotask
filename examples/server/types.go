@@ -1,17 +1,18 @@
-package task
+package main
 
 import (
 	"time"
+
+	task "github.com/langhuihui/gotask"
 )
 
-// TaskInfo 任务信息结构（与 monibuca 保持一致）
 type TaskInfo struct {
 	ID               uint32            `json:"id"`
-	Type             TaskType          `json:"type"`
-	OwnerType        string            `json:"owner"`
+	Type             task.TaskType     `json:"type"`
+	OwnerType        string            `json:"ownerType"`
 	StartTime        time.Time         `json:"startTime"`
 	Descriptions     map[string]string `json:"description"`
-	State            TaskState         `json:"state"`
+	State            task.TaskState    `json:"state"`
 	Blocked          *TaskInfo         `json:"blocked,omitempty"`
 	Blocking         bool              `json:"blocking,omitempty"`
 	Pointer          uint64            `json:"pointer"`
@@ -29,15 +30,16 @@ type TaskInfo struct {
 // TaskHistory 任务历史记录
 type TaskHistory struct {
 	ID           uint32            `json:"id"`
-	Type         TaskType          `json:"type"`
+	Type         task.TaskType     `json:"type"`
 	OwnerType    string            `json:"ownerType"`
 	StartTime    time.Time         `json:"startTime"`
 	EndTime      time.Time         `json:"endTime"`
 	Duration     time.Duration     `json:"duration"`
-	State        TaskState         `json:"state"`
+	State        task.TaskState    `json:"state"`
 	StopReason   string            `json:"stopReason"`
 	RetryCount   int               `json:"retryCount"`
 	Descriptions map[string]string `json:"descriptions"`
+	MaxRetry     int               `json:"maxRetry"`
 }
 
 // TaskStats 任务统计信息

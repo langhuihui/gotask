@@ -12,12 +12,6 @@ import (
 	task "github.com/langhuihui/gotask"
 )
 
-// 使用gotask项目定义的任务信息结构
-type TaskInfo = task.TaskInfo
-type TaskHistory = task.TaskHistory
-type TaskTree = task.TaskTree
-type TaskStats = task.TaskStats
-
 // DemoTask 演示任务
 type DemoTask struct {
 	task.Task
@@ -217,22 +211,14 @@ func (s *Server) addToHistory(t task.ITask) {
 	s.historyMutex.Unlock()
 }
 
-func (s *Server) getTaskTree() *TaskTree {
-	// 使用gotask项目提供的BuildTaskTree函数
-	rootInfo := task.BuildTaskTree(s.taskManager)
-	if rootInfo == nil {
-		return &TaskTree{}
-	}
-
-	return &TaskTree{
-		Root: rootInfo,
-	}
+func (s *Server) getTaskTree() *TaskInfo {
+	return BuildTaskTree(s.taskManager)
 }
 
 func (s *Server) getTasks() []TaskInfo {
 	var tasks []TaskInfo
 	s.taskManager.Range(func(t *TaskItem) bool {
-		info := task.GetTaskInfo(t.ITask)
+		info := GetTaskInfo(t.ITask)
 		if info != nil {
 			tasks = append(tasks, *info)
 		}
@@ -313,7 +299,7 @@ func (s *Server) getTaskHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	info := task.GetTaskInfo(t)
+	info := GetTaskInfo(t)
 	if info == nil {
 		http.NotFound(w, r)
 		return
@@ -412,7 +398,7 @@ func main() {
 	// 静态文件服务
 	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./web/dist")))
 
-	fmt.Println("GoTask Server starting on :8080...")
+	fmt.Println("GoTask Server starting on :8082...")
 	fmt.Println("API endpoints:")
 	fmt.Println("  GET  /api/tasks/tree     - Get task tree")
 	fmt.Println("  GET  /api/tasks          - Get all tasks")
@@ -421,6 +407,11 @@ func main() {
 	fmt.Println("  POST /api/tasks/{id}/stop - Stop a task")
 	fmt.Println("  GET  /api/tasks/history  - Get task history")
 	fmt.Println("  GET  /api/tasks/stats    - Get task statistics")
-
-	log.Fatal(http.ListenAndServe(":8082", r))
+	s := http.Server{
+		Addr:    ":8082",
+		Handler: r,
+	}
+	server.taskManager.OnStop(s.Close)
+	s.ListenAndServe()
+	log.Fatal(s.ListenAndServe())
 }

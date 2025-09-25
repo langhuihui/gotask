@@ -1,0 +1,82 @@
+{
+  "app": {
+    "title": "GoTask 任务管理系统"
+  },
+  "task": {
+    "tree": "任务树",
+    "detail": "任务详情",
+    "createDemo": "创建示例任务",
+    "refresh": "刷新",
+    "restart": "重启",
+    "stop": "停止",
+    "stopTask": "停止任务",
+    "noData": "暂无任务数据",
+    "selectTask": "请选择一个任务查看详情",
+    "total": "共 {{count}} 条任务"
+  },
+  "table": {
+    "owner": "拥有者",
+    "taskId": "任务ID",
+    "type": "类型",
+    "state": "状态",
+    "startTime": "开始时间",
+    "endTime": "结束时间",
+    "duration": "运行时长",
+    "retryCount": "重试次数",
+    "startReason": "发起程序",
+    "stopReason": "停止原因",
+    "actions": "操作"
+  },
+  "taskType": {
+    "task": "任务",
+    "job": "作业",
+    "work": "工作",
+    "channel": "通道"
+  },
+  "taskState": {
+    "init": "初始化",
+    "starting": "启动中",
+    "started": "已启动",
+    "running": "运行中",
+    "going": "进行中",
+    "disposing": "处理中",
+    "disposed": "已处理"
+  },
+  "taskDetail": {
+    "taskId": "任务ID",
+    "taskType": "任务类型",
+    "ownerType": "拥有者类型",
+    "taskState": "任务状态",
+    "taskLevel": "任务层级",
+    "retryCount": "重试次数",
+    "startTime": "开始时间",
+    "duration": "运行时长",
+    "startReason": "开始原因",
+    "stopReason": "停止原因",
+    "parentTaskId": "父任务ID",
+    "childTaskCount": "子任务数量",
+    "description": "描述信息"
+  },
+  "message": {
+    "getTaskTreeFailed": "获取任务树失败",
+    "createDemoTaskSuccess": "示例任务已创建",
+    "createDemoTaskFailed": "创建示例任务失败",
+    "taskRestarted": "任务已重启",
+    "restartTaskFailed": "重启任务失败",
+    "taskStopped": "任务已停止",
+    "stopTaskFailed": "停止任务失败"
+  },
+  "language": {
+    "switch": "切换语言",
+    "chinese": "中文",
+    "english": "English"
+  },
+  "history": {
+    "title": "任务历史",
+    "refresh": "刷新",
+    "view": "查看",
+    "startDate": "开始日期",
+    "endDate": "结束日期",
+    "total": "共 {{count}} 条记录"
+  }
+}

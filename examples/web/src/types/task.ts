@@ -1,10 +1,10 @@
 export interface TaskInfo {
   id: number;
-  type: 'TASK' | 'JOB' | 'WORK' | 'CHANNEL';
+  type: number; // 0=TASK, 1=JOB, 2=WORK, 3=CHANNEL
   owner: string;
   startTime: string;
   description: Record<string, string>;
-  state: 'INIT' | 'STARTING' | 'STARTED' | 'RUNNING' | 'GOING' | 'DISPOSING' | 'DISPOSED';
+  state: number; // 0=INIT, 1=STARTING, 2=STARTED, 3=RUNNING, 4=GOING, 5=DISPOSING, 6=DISPOSED
   blocked?: TaskInfo;
   blocking?: boolean;
   pointer: string;

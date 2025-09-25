@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { Card, Table, Tag, Button, Space, Tooltip, DatePicker } from 'antd';
-import { ReloadOutlined, EyeOutlined } from '@ant-design/icons';
-import type { TaskHistory } from '../types/task';
-import { taskApi } from '../services/api';
-import type { ColumnsType } from 'antd/es/table';
-import dayjs from 'dayjs';
+import React, { useState, useEffect } from "react";
+import { Card, Table, Tag, Button, Space, Tooltip, DatePicker } from "antd";
+import { ReloadOutlined, EyeOutlined } from "@ant-design/icons";
+import type { TaskHistory } from "../types/task";
+import { taskApi } from "../services/api";
+import type { ColumnsType } from "antd/es/table";
+import dayjs from "dayjs";
+import { useLanguage } from "../hooks/useLanguage";
 
 const { RangePicker } = DatePicker;
 
@@ -13,29 +14,34 @@ interface TaskHistoryProps {
 }
 
 const TaskHistoryComponent: React.FC<TaskHistoryProps> = ({ onTaskSelect }) => {
+  const { t } = useLanguage();
   const [history, setHistory] = useState<TaskHistory[]>([]);
   const [loading, setLoading] = useState(false);
-  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(null);
+  const [dateRange, setDateRange] = useState<[dayjs.Dayjs, dayjs.Dayjs] | null>(
+    null
+  );
 
   const fetchHistory = async () => {
     setLoading(true);
     try {
       const data = await taskApi.getTaskHistory();
-      
+
       // 如果有日期范围，则过滤数据
       let filteredData = data;
       if (dateRange) {
         const [start, end] = dateRange;
-        filteredData = data.filter(item => {
+        filteredData = data.filter((item) => {
           const itemDate = dayjs(item.startTime);
-          return itemDate.isAfter(start.startOf('day')) && 
-                 itemDate.isBefore(end.endOf('day'));
+          return (
+            itemDate.isAfter(start.startOf("day")) &&
+            itemDate.isBefore(end.endOf("day"))
+          );
         });
       }
-      
+
       setHistory(filteredData);
     } catch (error) {
-      console.error('获取任务历史失败:', error);
+      console.error("获取任务历史失败:", error);
     } finally {
       setLoading(false);
     }
@@ -49,25 +55,25 @@ const TaskHistoryComponent: React.FC<TaskHistoryProps> = ({ onTaskSelect }) => {
 
   const getStateColor = (state: string) => {
     const colors: Record<string, string> = {
-      INIT: 'default',
-      STARTING: 'processing',
-      STARTED: 'processing',
-      RUNNING: 'success',
-      GOING: 'success',
-      DISPOSING: 'warning',
-      DISPOSED: 'error',
+      INIT: "default",
+      STARTING: "processing",
+      STARTED: "processing",
+      RUNNING: "success",
+      GOING: "success",
+      DISPOSING: "warning",
+      DISPOSED: "error",
     };
-    return colors[state] || 'default';
+    return colors[state] || "default";
   };
 
   const getTypeColor = (type: string) => {
     const colors: Record<string, string> = {
-      TASK: 'blue',
-      JOB: 'green',
-      WORK: 'orange',
-      CHANNEL: 'purple',
+      TASK: "blue",
+      JOB: "green",
+      WORK: "orange",
+      CHANNEL: "purple",
     };
-    return colors[type] || 'default';
+    return colors[type] || "default";
   };
 
   const formatDuration = (duration: number) => {
@@ -84,125 +90,129 @@ const TaskHistoryComponent: React.FC<TaskHistoryProps> = ({ onTaskSelect }) => {
 
   const columns: ColumnsType<TaskHistory> = [
     {
-      title: '任务ID',
-      dataIndex: 'id',
-      key: 'id',
+      title: t("table.taskId"),
+      dataIndex: "id",
+      key: "id",
       width: 80,
       sorter: (a, b) => a.id - b.id,
     },
     {
-      title: '类型',
-      dataIndex: 'type',
-      key: 'type',
+      title: t("table.type"),
+      dataIndex: "type",
+      key: "type",
       width: 100,
-      render: (type: string) => (
-        <Tag color={getTypeColor(type)}>{type}</Tag>
-      ),
+      render: (type: string) => <Tag color={getTypeColor(type)}>{type}</Tag>,
       filters: [
-        { text: 'TASK', value: 'TASK' },
-        { text: 'JOB', value: 'JOB' },
-        { text: 'WORK', value: 'WORK' },
-        { text: 'CHANNEL', value: 'CHANNEL' },
+        { text: "TASK", value: "TASK" },
+        { text: "JOB", value: "JOB" },
+        { text: "WORK", value: "WORK" },
+        { text: "CHANNEL", value: "CHANNEL" },
       ],
       onFilter: (value, record) => record.type === value,
     },
     {
-      title: '拥有者',
-      dataIndex: 'ownerType',
-      key: 'ownerType',
+      title: t("table.owner"),
+      dataIndex: "ownerType",
+      key: "ownerType",
       width: 120,
     },
     {
-      title: '状态',
-      dataIndex: 'state',
-      key: 'state',
+      title: t("table.state"),
+      dataIndex: "state",
+      key: "state",
       width: 100,
       render: (state: string) => (
         <Tag color={getStateColor(state)}>{state}</Tag>
       ),
       filters: [
-        { text: 'INIT', value: 'INIT' },
-        { text: 'STARTING', value: 'STARTING' },
-        { text: 'STARTED', value: 'STARTED' },
-        { text: 'RUNNING', value: 'RUNNING' },
-        { text: 'GOING', value: 'GOING' },
-        { text: 'DISPOSING', value: 'DISPOSING' },
-        { text: 'DISPOSED', value: 'DISPOSED' },
+        { text: "INIT", value: "INIT" },
+        { text: "STARTING", value: "STARTING" },
+        { text: "STARTED", value: "STARTED" },
+        { text: "RUNNING", value: "RUNNING" },
+        { text: "GOING", value: "GOING" },
+        { text: "DISPOSING", value: "DISPOSING" },
+        { text: "DISPOSED", value: "DISPOSED" },
       ],
       onFilter: (value, record) => record.state === value,
     },
     {
-      title: '开始时间',
-      dataIndex: 'startTime',
-      key: 'startTime',
+      title: t("table.startTime"),
+      dataIndex: "startTime",
+      key: "startTime",
       width: 180,
       render: (time: string) => new Date(time).toLocaleString(),
-      sorter: (a, b) => new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
+      sorter: (a, b) =>
+        new Date(a.startTime).getTime() - new Date(b.startTime).getTime(),
     },
     {
-      title: '结束时间',
-      dataIndex: 'endTime',
-      key: 'endTime',
+      title: t("table.endTime"),
+      dataIndex: "endTime",
+      key: "endTime",
       width: 180,
       render: (time: string) => new Date(time).toLocaleString(),
     },
     {
-      title: '运行时长',
-      dataIndex: 'duration',
-      key: 'duration',
+      title: t("table.duration"),
+      dataIndex: "duration",
+      key: "duration",
       width: 120,
       render: (duration: number) => formatDuration(duration),
       sorter: (a, b) => a.duration - b.duration,
     },
     {
-      title: '重试次数',
-      dataIndex: 'retryCount',
-      key: 'retryCount',
+      title: t("table.retryCount"),
+      dataIndex: "retryCount",
+      key: "retryCount",
       width: 100,
       sorter: (a, b) => a.retryCount - b.retryCount,
     },
     {
-      title: '停止原因',
-      dataIndex: 'stopReason',
-      key: 'stopReason',
+      title: t("table.stopReason"),
+      dataIndex: "stopReason",
+      key: "stopReason",
       width: 150,
-      render: (reason: string) => reason ? (
-        <Tooltip title={reason}>
-          <Tag color="error">{reason.length > 20 ? reason.substring(0, 20) + '...' : reason}</Tag>
-        </Tooltip>
-      ) : '-',
+      render: (reason: string) =>
+        reason ? (
+          <Tooltip title={reason}>
+            <Tag color="error">
+              {reason.length > 20 ? reason.substring(0, 20) + "..." : reason}
+            </Tag>
+          </Tooltip>
+        ) : (
+          "-"
+        ),
     },
     {
-      title: '操作',
-      key: 'action',
+      title: t("table.actions"),
+      key: "action",
       width: 80,
       render: (_, record) => (
-        <Button 
-          type="link" 
+        <Button
+          type="link"
           icon={<EyeOutlined />}
           onClick={() => onTaskSelect?.(record.id)}
         >
-          查看
+          {t("history.view")}
         </Button>
       ),
     },
   ];
 
   return (
-    <Card 
-      title="任务历史" 
+    <Card
+      title={t("history.title")}
       extra={
         <Space>
-          <RangePicker 
+          <RangePicker
             onChange={(dates) => setDateRange(dates as any)}
-            placeholder={['开始日期', '结束日期']}
+            placeholder={[t("history.startDate"), t("history.endDate")]}
           />
-          <Button 
-            icon={<ReloadOutlined />} 
+          <Button
+            icon={<ReloadOutlined />}
             onClick={fetchHistory}
             loading={loading}
           >
-            刷新
+            {t("history.refresh")}
           </Button>
         </Space>
       }
@@ -218,7 +228,7 @@ const TaskHistoryComponent: React.FC<TaskHistoryProps> = ({ onTaskSelect }) => {
           pageSize: 20,
           showSizeChanger: true,
           showQuickJumper: true,
-          showTotal: (total) => `共 ${total} 条记录`,
+          showTotal: (total) => t("history.total", { count: total }),
         }}
       />
     </Card>
