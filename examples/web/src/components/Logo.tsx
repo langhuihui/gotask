@@ -35,7 +35,7 @@ const Logo: React.FC<LogoProps> = ({
           r="15"
           fill="#1890ff"
           stroke="#40a9ff"
-          stroke-width="1"
+          strokeWidth="1"
         />
 
         {/* 任务图标 - 简化的齿轮 */}
@@ -47,7 +47,7 @@ const Logo: React.FC<LogoProps> = ({
             r="6"
             fill="none"
             stroke="white"
-            stroke-width="1.5"
+            strokeWidth="1.5"
           />
           {/* 齿轮齿 */}
           <rect x="7" y="2" width="2" height="1.5" fill="white" />

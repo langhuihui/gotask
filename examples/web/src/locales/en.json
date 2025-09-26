@@ -77,6 +77,34 @@
     "view": "View",
     "startDate": "Start Date",
     "endDate": "End Date",
-    "total": "Total {{count}} records"
+    "total": "Total {{count}} records",
+    "session": "Session",
+    "sessionList": "Session List",
+    "taskList": "Task List",
+    "tableView": "Table View",
+    "ganttView": "Timeline",
+    "filter": "Filter",
+    "ownerType": "Owner Type",
+    "taskType": "Task Type",
+    "sessionId": "Session ID",
+    "parentId": "Parent Task ID",
+    "timeRange": "Time Range",
+    "reset": "Reset",
+    "apply": "Apply",
+    "statistics": "Statistics",
+    "totalTasks": "Total Tasks",
+    "totalDuration": "Total Duration",
+    "averageDuration": "Average Duration",
+    "ownerTypeStats": "By Owner",
+    "taskTypeStats": "By Type",
+    "stateStats": "By State"
+  },
+  "session": {
+    "title": "Session Information",
+    "id": "Session ID",
+    "startTime": "Start Time",
+    "endTime": "End Time",
+    "pid": "Process ID",
+    "args": "Start Arguments"
   }
 }

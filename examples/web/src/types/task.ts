@@ -21,15 +21,46 @@ export interface TaskInfo {
 
 export interface TaskHistory {
   id: number;
-  type: 'TASK' | 'JOB' | 'WORK' | 'CHANNEL';
+  type: number; // 0=TASK, 1=JOB, 2=WORK, 3=CHANNEL
   ownerType: string;
   startTime: string;
   endTime: string;
   duration: number;
-  state: 'INIT' | 'STARTING' | 'STARTED' | 'RUNNING' | 'GOING' | 'DISPOSING' | 'DISPOSED';
+  state: number; // 0=INIT, 1=STARTING, 2=STARTED, 3=RUNNING, 4=GOING, 5=DISPOSING, 6=DISPOSED
   stopReason?: string;
   retryCount: number;
   descriptions: Record<string, string>;
+  maxRetry: number;
+  parentId?: number;
+  level: number;
+  sessionId?: string;
+}
+
+export interface TaskHistoryFilter {
+  ownerType?: string;
+  taskType?: number;
+  startTime?: string;
+  endTime?: string;
+  sessionId?: string;
+  parentId?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface TaskHistoryResponse {
+  tasks: TaskHistory[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+}
+
+export interface SessionInfo {
+  id: string;
+  startTime: string;
+  endTime?: string;
+  pid: number;
+  args: string;
 }
 
 export interface TaskStats {

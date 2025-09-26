@@ -40,6 +40,39 @@ type TaskHistory struct {
 	RetryCount   int               `json:"retryCount"`
 	Descriptions map[string]string `json:"descriptions"`
 	MaxRetry     int               `json:"maxRetry"`
+	ParentID     uint32            `json:"parentId,omitempty"`
+	Level        uint32            `json:"level"`
+	SessionID    string            `json:"sessionId,omitempty"`
+}
+
+// TaskHistoryFilter 任务历史过滤条件
+type TaskHistoryFilter struct {
+	OwnerType string        `json:"ownerType,omitempty"`
+	TaskType  task.TaskType `json:"taskType,omitempty"`
+	StartTime *time.Time    `json:"startTime,omitempty"`
+	EndTime   *time.Time    `json:"endTime,omitempty"`
+	SessionID string        `json:"sessionId,omitempty"`
+	ParentID  *uint32       `json:"parentId,omitempty"`
+	Limit     int           `json:"limit,omitempty"`
+	Offset    int           `json:"offset,omitempty"`
+}
+
+// TaskHistoryResponse 任务历史查询响应
+type TaskHistoryResponse struct {
+	Tasks      []TaskHistory `json:"tasks"`
+	Total      int           `json:"total"`
+	Page       int           `json:"page"`
+	PageSize   int           `json:"pageSize"`
+	TotalPages int           `json:"totalPages"`
+}
+
+// SessionInfo 会话信息
+type SessionInfo struct {
+	ID        string    `json:"id"`
+	StartTime time.Time `json:"startTime"`
+	EndTime   time.Time `json:"endTime,omitempty"`
+	PID       int       `json:"pid"`
+	Args      string    `json:"args"`
 }
 
 // TaskStats 任务统计信息

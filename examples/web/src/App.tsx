@@ -1,6 +1,7 @@
-import React, { useEffect } from "react";
-import { Layout, Typography } from "antd";
+import React, { useEffect, useState } from "react";
+import { Layout, Typography, Tabs } from "antd";
 import TaskTree from "./components/TaskTree";
+import TaskHistoryView from "./components/TaskHistoryView";
 import LanguageSwitcher from "./components/LanguageSwitcher";
 import { useLanguage } from "./hooks/useLanguage";
 
@@ -9,11 +10,25 @@ const { Title } = Typography;
 
 const App: React.FC = () => {
   const { t, currentLanguage } = useLanguage();
+  const [activeTab, setActiveTab] = useState("task-tree");
 
   // 更新页面标题
   useEffect(() => {
     document.title = t("app.title");
   }, [t, currentLanguage]);
+
+  const tabItems = [
+    {
+      key: "task-tree",
+      label: t("task.tree"),
+      children: <TaskTree />,
+    },
+    {
+      key: "task-history",
+      label: t("history.title"),
+      children: <TaskHistoryView />,
+    },
+  ];
 
   return (
     <Layout style={{ minHeight: "100vh", width: "100%", maxWidth: "none" }}>
@@ -41,7 +56,12 @@ const App: React.FC = () => {
           maxWidth: "none",
         }}
       >
-        <TaskTree />
+        <Tabs
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={tabItems}
+          size="large"
+        />
       </Content>
     </Layout>
   );

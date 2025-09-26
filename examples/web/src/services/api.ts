@@ -1,7 +1,7 @@
 import axios from 'axios';
-import type { TaskInfo, TaskHistory, TaskStats } from '../types/task';
+import type { TaskInfo, TaskStats, TaskHistoryResponse, SessionInfo, TaskHistoryFilter } from '../types/task';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8080/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8082/api';
 
 const api = axios.create({
   baseURL: API_BASE,
@@ -32,9 +32,32 @@ export const taskApi = {
     await api.post(`/tasks/${id}/stop`, { reason });
   },
 
-  // 获取任务历史
-  getTaskHistory: async (): Promise<TaskHistory[]> => {
-    const response = await api.get('/tasks/history');
+  // 获取任务历史（支持过滤和分页）
+  getTaskHistory: async (filter?: TaskHistoryFilter): Promise<TaskHistoryResponse> => {
+    const params = new URLSearchParams();
+    if (filter) {
+      if (filter.ownerType) params.append('ownerType', filter.ownerType);
+      if (filter.taskType !== undefined) params.append('taskType', filter.taskType.toString());
+      if (filter.sessionId) params.append('sessionId', filter.sessionId);
+      if (filter.parentId) params.append('parentId', filter.parentId.toString());
+      if (filter.startTime) params.append('startTime', filter.startTime);
+      if (filter.endTime) params.append('endTime', filter.endTime);
+      if (filter.limit) params.append('limit', filter.limit.toString());
+      if (filter.offset) params.append('offset', filter.offset.toString());
+    }
+    const response = await api.get(`/tasks/history?${params.toString()}`);
+    return response.data;
+  },
+
+  // 获取任务历史统计
+  getTaskHistoryStats: async (): Promise<any> => {
+    const response = await api.get('/tasks/history/stats');
+    return response.data;
+  },
+
+  // 获取会话信息
+  getSessionInfo: async (): Promise<SessionInfo> => {
+    const response = await api.get('/session');
     return response.data;
   },
 

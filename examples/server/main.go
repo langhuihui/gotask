@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"sync"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -113,9 +115,11 @@ type TaskManager = task.RootManager[uint32, *TaskItem]
 
 // 服务器结构
 type Server struct {
-	taskManager  *TaskManager
-	taskHistory  []TaskHistory
-	historyMutex sync.Mutex
+	taskManager   *TaskManager
+	database      *Database
+	sessionID     string
+	sessionStart  time.Time
+	enableHistory bool
 }
 
 func NewServer() *Server {
@@ -126,9 +130,24 @@ func NewServer() *Server {
 	keepaliveTask := &KeepaliveTask{}
 	tm.AddTask(keepaliveTask)
 
+	// 初始化数据库
+	db, err := NewDatabase("gotask.db")
+	if err != nil {
+		log.Fatalf("Failed to initialize database: %v", err)
+	}
+
+	// 创建会话
+	sessionID, err := db.CreateSession(os.Getpid(), strings.Join(os.Args, " "))
+	if err != nil {
+		log.Fatalf("Failed to create session: %v", err)
+	}
+
 	return &Server{
-		taskManager: tm,
-		taskHistory: make([]TaskHistory, 0),
+		taskManager:   tm,
+		database:      db,
+		sessionID:     sessionID,
+		sessionStart:  time.Now(),
+		enableHistory: true,
 	}
 }
 
@@ -158,57 +177,47 @@ func (s *Server) createDemoTasks() {
 	})
 	s.taskManager.AddTask(&TaskItem{parentTask})
 
-	// 启动任务监控
-	go s.monitorTasks()
+	// 设置任务完成事件监听（参考monibuca实现）
+	s.taskManager.OnDescendantsDispose(s.saveTask)
 }
 
-func (s *Server) monitorTasks() {
-	ticker := time.NewTicker(time.Second * 2)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		// 检查已完成的任务并记录到历史
-		s.taskManager.Range(func(t *TaskItem) bool {
-			if t.GetState() == task.TASK_STATE_DISPOSED {
-				s.addToHistory(t.ITask)
-			}
-			return true
-		})
+// saveTask 保存任务信息到历史记录（参考monibuca实现）
+func (s *Server) saveTask(task task.ITask) {
+	if !s.enableHistory {
+		return
 	}
-}
 
-func (s *Server) addToHistory(t task.ITask) {
 	history := TaskHistory{
-		ID:           t.GetTaskID(),
-		Type:         t.GetTaskType(),
-		OwnerType:    t.GetOwnerType(),
-		StartTime:    t.GetTask().StartTime,
+		ID:           task.GetTaskID(),
+		Type:         task.GetTaskType(),
+		OwnerType:    task.GetOwnerType(),
+		StartTime:    task.GetTask().StartTime,
 		EndTime:      time.Now(),
-		Duration:     time.Since(t.GetTask().StartTime),
-		State:        t.GetState(),
-		RetryCount:   t.GetTask().GetRetryCount(),
-		Descriptions: t.GetDescriptions(),
+		Duration:     time.Since(task.GetTask().StartTime),
+		State:        task.GetState(),
+		RetryCount:   task.GetTask().GetRetryCount(),
+		Descriptions: task.GetDescriptions(),
+		MaxRetry:     task.GetTask().GetMaxRetry(),
+		Level:        uint32(task.GetLevel()),
+		SessionID:    s.sessionID,
 	}
 
-	if t.StopReason() != nil {
-		history.StopReason = t.StopReason().Error()
+	// 设置父任务ID
+	if parent := task.GetParent(); parent != nil {
+		history.ParentID = parent.GetTaskID()
 	}
 
-	s.historyMutex.Lock()
-	// 避免重复添加
-	exists := false
-	for _, h := range s.taskHistory {
-		if h.ID == history.ID {
-			exists = true
-			break
-		}
+	if task.StopReason() != nil {
+		history.StopReason = task.StopReason().Error()
 	}
-	if !exists {
-		s.taskHistory = append(s.taskHistory, history)
-		log.Printf("Task added to history: ID=%d, Type=%s, Duration=%v",
-			history.ID, history.OwnerType, history.Duration)
+
+	// 保存到数据库
+	if err := s.database.SaveTaskHistory(history); err != nil {
+		log.Printf("Failed to save task history: %v", err)
+	} else {
+		log.Printf("Task saved to history: ID=%d, Type=%s, Duration=%v, Session=%s",
+			history.ID, history.OwnerType, history.Duration, history.SessionID)
 	}
-	s.historyMutex.Unlock()
 }
 
 func (s *Server) getTaskTree() *TaskInfo {
@@ -243,9 +252,39 @@ func (s *Server) stopTask(id uint32, reason string) error {
 }
 
 func (s *Server) getTaskHistory() []TaskHistory {
-	s.historyMutex.Lock()
-	defer s.historyMutex.Unlock()
-	return s.taskHistory
+	response, err := s.database.GetTaskHistory(TaskHistoryFilter{})
+	if err != nil {
+		log.Printf("Failed to get task history: %v", err)
+		return []TaskHistory{}
+	}
+	return response.Tasks
+}
+
+func (s *Server) getTaskHistoryWithFilter(filter TaskHistoryFilter) TaskHistoryResponse {
+	response, err := s.database.GetTaskHistory(filter)
+	if err != nil {
+		log.Printf("Failed to get task history with filter: %v", err)
+		return TaskHistoryResponse{}
+	}
+	return response
+}
+
+func (s *Server) getSessionInfo() SessionInfo {
+	session, err := s.database.GetSession(s.sessionID)
+	if err != nil {
+		log.Printf("Failed to get session info: %v", err)
+		return SessionInfo{
+			ID:        s.sessionID,
+			StartTime: s.sessionStart,
+			EndTime:   time.Now(),
+			PID:       os.Getpid(),
+			Args:      strings.Join(os.Args, " "),
+		}
+	}
+
+	// 更新结束时间
+	session.EndTime = time.Now()
+	return *session
 }
 
 func (s *Server) getTaskStats() TaskStats {
@@ -343,9 +382,57 @@ func (s *Server) stopTaskHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTaskHistoryHandler(w http.ResponseWriter, r *http.Request) {
-	history := s.getTaskHistory()
+	// 解析查询参数
+	filter := TaskHistoryFilter{}
+
+	if ownerType := r.URL.Query().Get("ownerType"); ownerType != "" {
+		filter.OwnerType = ownerType
+	}
+
+	if taskTypeStr := r.URL.Query().Get("taskType"); taskTypeStr != "" {
+		if taskType, err := strconv.Atoi(taskTypeStr); err == nil {
+			filter.TaskType = task.TaskType(taskType)
+		}
+	}
+
+	if sessionID := r.URL.Query().Get("sessionId"); sessionID != "" {
+		filter.SessionID = sessionID
+	}
+
+	if parentIDStr := r.URL.Query().Get("parentId"); parentIDStr != "" {
+		if parentID, err := strconv.ParseUint(parentIDStr, 10, 32); err == nil {
+			parentIDUint32 := uint32(parentID)
+			filter.ParentID = &parentIDUint32
+		}
+	}
+
+	if startTimeStr := r.URL.Query().Get("startTime"); startTimeStr != "" {
+		if startTime, err := time.Parse(time.RFC3339, startTimeStr); err == nil {
+			filter.StartTime = &startTime
+		}
+	}
+
+	if endTimeStr := r.URL.Query().Get("endTime"); endTimeStr != "" {
+		if endTime, err := time.Parse(time.RFC3339, endTimeStr); err == nil {
+			filter.EndTime = &endTime
+		}
+	}
+
+	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
+		if limit, err := strconv.Atoi(limitStr); err == nil {
+			filter.Limit = limit
+		}
+	}
+
+	if offsetStr := r.URL.Query().Get("offset"); offsetStr != "" {
+		if offset, err := strconv.Atoi(offsetStr); err == nil {
+			filter.Offset = offset
+		}
+	}
+
+	response := s.getTaskHistoryWithFilter(filter)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(history)
+	json.NewEncoder(w).Encode(response)
 }
 
 func (s *Server) getTaskStatsHandler(w http.ResponseWriter, r *http.Request) {
@@ -358,6 +445,23 @@ func (s *Server) createDemoTaskHandler(w http.ResponseWriter, r *http.Request) {
 	s.createDemoTasks()
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{"message": "Demo tasks created"})
+}
+
+func (s *Server) getSessionInfoHandler(w http.ResponseWriter, r *http.Request) {
+	sessionInfo := s.getSessionInfo()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(sessionInfo)
+}
+
+func (s *Server) getTaskHistoryStatsHandler(w http.ResponseWriter, r *http.Request) {
+	stats, err := s.database.GetTaskHistoryStats(s.sessionID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to get task history stats: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(stats)
 }
 
 func main() {
@@ -390,6 +494,8 @@ func main() {
 	api.HandleFunc("/tasks/tree", server.getTaskTreeHandler).Methods("GET")
 	api.HandleFunc("/tasks/stats", server.getTaskStatsHandler).Methods("GET")
 	api.HandleFunc("/tasks/history", server.getTaskHistoryHandler).Methods("GET")
+	api.HandleFunc("/tasks/history/stats", server.getTaskHistoryStatsHandler).Methods("GET")
+	api.HandleFunc("/session", server.getSessionInfoHandler).Methods("GET")
 	api.HandleFunc("/tasks", server.getTasksHandler).Methods("GET")
 	api.HandleFunc("/tasks", server.createDemoTaskHandler).Methods("POST")
 	api.HandleFunc("/tasks/{id:[0-9]+}/stop", server.stopTaskHandler).Methods("POST")
@@ -400,18 +506,33 @@ func main() {
 
 	fmt.Println("GoTask Server starting on :8082...")
 	fmt.Println("API endpoints:")
-	fmt.Println("  GET  /api/tasks/tree     - Get task tree")
-	fmt.Println("  GET  /api/tasks          - Get all tasks")
-	fmt.Println("  POST /api/tasks          - Create demo tasks")
-	fmt.Println("  GET  /api/tasks/{id}     - Get task details")
-	fmt.Println("  POST /api/tasks/{id}/stop - Stop a task")
-	fmt.Println("  GET  /api/tasks/history  - Get task history")
-	fmt.Println("  GET  /api/tasks/stats    - Get task statistics")
+	fmt.Println("  GET  /api/tasks/tree           - Get task tree")
+	fmt.Println("  GET  /api/tasks                - Get all tasks")
+	fmt.Println("  POST /api/tasks                - Create demo tasks")
+	fmt.Println("  GET  /api/tasks/{id}           - Get task details")
+	fmt.Println("  POST /api/tasks/{id}/stop      - Stop a task")
+	fmt.Println("  GET  /api/tasks/history        - Get task history (with filtering)")
+	fmt.Println("  GET  /api/tasks/history/stats  - Get task history statistics")
+	fmt.Println("  GET  /api/session              - Get session information")
+	fmt.Println("  GET  /api/tasks/stats          - Get task statistics")
+	fmt.Println("")
+	fmt.Println("Task History Query Parameters:")
+	fmt.Println("  ownerType  - Filter by owner type")
+	fmt.Println("  taskType   - Filter by task type (0=TASK, 1=JOB, 2=WORK, 3=CHANNEL)")
+	fmt.Println("  sessionId  - Filter by session ID")
+	fmt.Println("  parentId   - Filter by parent task ID")
+	fmt.Println("  startTime  - Filter by start time (RFC3339 format)")
+	fmt.Println("  endTime    - Filter by end time (RFC3339 format)")
+	fmt.Println("  limit      - Number of results per page (default: 50)")
+	fmt.Println("  offset     - Number of results to skip (default: 0)")
 	s := http.Server{
 		Addr:    ":8082",
 		Handler: r,
 	}
-	server.taskManager.OnStop(s.Close)
+	server.taskManager.OnStop(func() {
+		s.Close()
+		server.database.Close()
+	})
 	s.ListenAndServe()
 	log.Fatal(s.ListenAndServe())
 }

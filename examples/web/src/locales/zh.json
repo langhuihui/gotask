@@ -77,6 +77,34 @@
     "view": "查看",
     "startDate": "开始日期",
     "endDate": "结束日期",
-    "total": "共 {{count}} 条记录"
+    "total": "共 {{count}} 条记录",
+    "session": "会话",
+    "sessionList": "会话列表",
+    "taskList": "任务列表",
+    "tableView": "表格视图",
+    "ganttView": "时间轴",
+    "filter": "筛选",
+    "ownerType": "拥有者类型",
+    "taskType": "任务类型",
+    "sessionId": "会话ID",
+    "parentId": "父任务ID",
+    "timeRange": "时间范围",
+    "reset": "重置",
+    "apply": "应用",
+    "statistics": "统计信息",
+    "totalTasks": "总任务数",
+    "totalDuration": "总执行时间",
+    "averageDuration": "平均执行时间",
+    "ownerTypeStats": "按拥有者统计",
+    "taskTypeStats": "按类型统计",
+    "stateStats": "按状态统计"
+  },
+  "session": {
+    "title": "会话信息",
+    "id": "会话ID",
+    "startTime": "开始时间",
+    "endTime": "结束时间",
+    "pid": "进程ID",
+    "args": "启动参数"
   }
 }

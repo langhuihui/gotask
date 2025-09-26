@@ -20,7 +20,6 @@ import (
 
 const TraceLevel = slog.Level(-8)
 const OwnerTypeKey = "ownerType"
-const ThrowPanic = false // 可以通过构建标签控制
 
 var (
 	ErrAutoStop        = errors.New("auto stop")
