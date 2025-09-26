@@ -12,6 +12,30 @@ import (
 	"github.com/langhuihui/gotask/util"
 )
 
+var idG sync.Mutex
+var taskIDCounter uint32
+var sourceFilePathPrefix string
+type ExistTaskError struct {
+	Task ITask
+}
+
+func (e ExistTaskError) Error() string {
+	return fmt.Sprintf("%v exist", e.Task.getKey())
+}
+
+func init() {
+	if _, file, _, ok := runtime.Caller(0); ok {
+		sourceFilePathPrefix = strings.TrimSuffix(file, "job.go")
+	}
+}
+
+func GetNextTaskID() uint32 {
+	idG.Lock()
+	defer idG.Unlock()
+	taskIDCounter++
+	return taskIDCounter
+}
+
 // Job 任务容器，可以包含和管理多个子任务
 type Job struct {
 	Task
@@ -64,7 +88,6 @@ func (mt *Job) onDescendantsDispose(descendants ITask) {
 
 func (mt *Job) onChildDispose(child ITask) {
 	mt.onDescendantsDispose(child)
-	mt.removeChild(child)
 	child.dispose()
 }
 
@@ -150,27 +173,21 @@ func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 	task.handler = t
 	mt.initContext(task, opt...)
 	if mt.IsStopped() {
-		if task.startup != nil {
-			task.startup.Reject(mt.StopReason())
-		}
+		task.startup.Reject(mt.StopReason())
 		return
 	}
 	actual, loaded := mt.children.LoadOrStore(t.getKey(), t)
 	if loaded {
-		if task.startup != nil {
-			task.startup.Reject(ExistTaskError{
-				Task: actual.(ITask),
-			})
-		}
+		task.startup.Reject(ExistTaskError{
+			Task: actual.(ITask),
+		})
 		return
 	}
 	var err error
 	defer func() {
 		if err != nil {
 			mt.children.Delete(t.getKey())
-			if task.startup != nil {
-				task.startup.Reject(err)
-			}
+			task.startup.Reject(err)
 		}
 	}()
 	if err = mt.eventLoop.add(mt, t); err != nil {
@@ -193,13 +210,4 @@ func (mt *Job) Call(callback func()) {
 	ctx, cancel := context.WithCancel(mt)
 	_ = mt.eventLoop.add(mt, func() { callback(); cancel() })
 	<-ctx.Done()
-}
-
-// ExistTaskError 任务已存在错误
-type ExistTaskError struct {
-	Task ITask
-}
-
-func (e ExistTaskError) Error() string {
-	return fmt.Sprintf("task already exists: %d", e.Task.GetTaskID())
 }

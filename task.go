@@ -18,11 +18,9 @@ import (
 	"github.com/langhuihui/gotask/util"
 )
 
-const (
-	TraceLevel     = slog.Level(-8)
-	OwnerTypeKey   = "ownerType"
-	ThrowPanic     = false // 可以通过构建标签控制
-)
+const TraceLevel = slog.Level(-8)
+const OwnerTypeKey = "ownerType"
+const ThrowPanic = false // 可以通过构建标签控制
 
 var (
 	ErrAutoStop        = errors.New("auto stop")
@@ -143,23 +141,6 @@ type (
 	}
 )
 
-var idG sync.Mutex
-var taskIDCounter uint32
-var sourceFilePathPrefix string
-
-func init() {
-	if _, file, _, ok := runtime.Caller(0); ok {
-		sourceFilePathPrefix = strings.TrimSuffix(file, "task.go")
-	}
-}
-
-func GetNextTaskID() uint32 {
-	idG.Lock()
-	defer idG.Unlock()
-	taskIDCounter++
-	return taskIDCounter
-}
-
 func FromPointer(pointer uintptr) *Task {
 	return (*Task)(unsafe.Pointer(pointer))
 }
@@ -262,7 +243,7 @@ func (task *Task) StopReasonIs(errs ...error) bool {
 
 func (task *Task) Stop(err error) {
 	if err == nil {
-		task.Error("task stop with nil error", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
+		task.Error("task stop with nil error", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType(), "parent", task.GetParent().GetOwnerType())
 		panic("task stop with nil error")
 	}
 	_, file, line, _ := runtime.Caller(1)
@@ -306,6 +287,9 @@ func (task *Task) Using(resource ...any) {
 }
 
 func (task *Task) OnStop(resource any) {
+	if t, ok := resource.(ITask); ok && t.GetTask() == task {
+		panic("onStop resource is task itself")
+	}
 	task.closeOnStop = append(task.closeOnStop, resource)
 }
 
@@ -317,7 +301,7 @@ func (task *Task) checkRetry(err error) bool {
 	if errors.Is(err, ErrTaskComplete) || errors.Is(err, ErrExit) || errors.Is(err, ErrStopByUser) {
 		return false
 	}
-	if task.parent != nil && task.parent.IsStopped() {
+	if task.parent.IsStopped() {
 		return false
 	}
 	if task.retry.MaxRetry < 0 || task.retry.RetryCount < task.retry.MaxRetry {
@@ -360,9 +344,7 @@ func (task *Task) start() bool {
 		}
 		if err == nil {
 			task.state = TASK_STATE_STARTED
-			if task.startup != nil {
-				task.startup.Fulfill(err)
-			}
+			task.startup.Fulfill(err)
 			for _, listener := range task.afterStartListeners {
 				if task.IsStopped() {
 					break
@@ -457,9 +439,7 @@ func (task *Task) dispose() {
 	if v, ok := task.handler.(TaskDisposal); ok {
 		v.Dispose()
 	}
-	if task.shutdown != nil {
-		task.shutdown.Fulfill(reason)
-	}
+	task.shutdown.Fulfill(reason)
 	task.SetDescription("disposeProcess", "resources")
 	task.stopOnce.Do(task.stop)
 	for _, resource := range task.resources {
@@ -546,5 +526,27 @@ func (task *Task) Error(msg string, args ...any) {
 }
 
 func (task *Task) TraceEnabled() bool {
-	return task.Logger != nil && task.Logger.Enabled(task.Context, TraceLevel)
+	return task.Logger.Enabled(task.Context, TraceLevel)
+}
+
+func (task *Task) RunTask(t ITask, opt ...any) (err error) {
+	tt := t.GetTask()
+	tt.handler = t
+	mt := task.parent
+	if job, ok := task.handler.(IJob); ok {
+		mt = job.getJob()
+	}
+	mt.initContext(tt, opt...)
+	if mt.IsStopped() {
+		err = mt.StopReason()
+		task.startup.Reject(err)
+		return
+	}
+	task.OnStop(t)
+	started := tt.start()
+	<-tt.Done()
+	if started {
+		tt.dispose()
+	}
+	return tt.StopReason()
 }
