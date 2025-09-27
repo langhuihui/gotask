@@ -97,15 +97,7 @@ func (t *MyTask) Dispose() {
 
 ### RootManager Setup
 ```go
-type TaskItem struct {
-    task.ITask
-}
-
-func (ti *TaskItem) GetKey() uint32 {
-    return ti.GetTaskID()
-}
-
-type TaskManager = task.RootManager[uint32, *TaskItem]
+type TaskManager = task.RootManager[uint32, *MyTask]
 
 func main() {
     // Create root manager
@@ -114,7 +106,7 @@ func main() {
     
     // Add tasks
     myTask := &MyTask{Name: "Example"}
-    root.AddTask(&TaskItem{myTask})
+    root.AddTask(myTask)
     
     // Wait for completion or handle signals
     myTask.WaitStopped()

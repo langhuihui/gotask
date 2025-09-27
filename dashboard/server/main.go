@@ -101,17 +101,8 @@ func (kt *KeepaliveTask) GetOwnerType() string {
 	return "KeepaliveTask"
 }
 
-// TaskItem 实现ManagerItem接口的任务项
-type TaskItem struct {
-	task.ITask
-}
-
-func (ti *TaskItem) GetKey() uint32 {
-	return ti.GetTaskID()
-}
-
 // 使用gotask项目的根任务管理器
-type TaskManager = task.RootManager[uint32, *TaskItem]
+type TaskManager = task.RootManager[uint32, task.ManagerItem[uint32]]
 
 // 服务器结构
 type Server struct {
@@ -154,7 +145,7 @@ func NewServer() *Server {
 func (s *Server) createDemoTasks() {
 	// 创建长期运行的任务
 	longTask := NewLongRunningTask("background-worker", time.Second*3)
-	s.taskManager.AddTask(&TaskItem{longTask})
+	s.taskManager.AddTask(longTask)
 
 	// 创建一些短期任务
 	for i := 1; i <= 3; i++ {
@@ -166,7 +157,7 @@ func (s *Server) createDemoTasks() {
 				time.Sleep(time.Millisecond * 500)
 			},
 		)
-		s.taskManager.AddTask(&TaskItem{demoTask})
+		s.taskManager.AddTask(demoTask)
 	}
 
 	// 创建一个会产生子任务的任务
@@ -175,7 +166,7 @@ func (s *Server) createDemoTasks() {
 			time.Sleep(time.Second * 2)
 		}
 	})
-	s.taskManager.AddTask(&TaskItem{parentTask})
+	s.taskManager.AddTask(parentTask)
 
 	// 设置任务完成事件监听（参考monibuca实现）
 	s.taskManager.OnDescendantsDispose(s.saveTask)
@@ -230,8 +221,8 @@ func (s *Server) getTaskTree() *TaskInfo {
 
 func (s *Server) getTasks() []TaskInfo {
 	var tasks []TaskInfo
-	s.taskManager.Range(func(t *TaskItem) bool {
-		info := GetTaskInfo(t.ITask)
+	s.taskManager.Range(func(t task.ManagerItem[uint32]) bool {
+		info := GetTaskInfo(t)
 		if info != nil {
 			tasks = append(tasks, *info)
 		}
@@ -296,7 +287,7 @@ func (s *Server) getSessionInfo() SessionInfo {
 func (s *Server) getTaskStats() TaskStats {
 	stats := TaskStats{}
 
-	s.taskManager.Range(func(t *TaskItem) bool {
+	s.taskManager.Range(func(t task.ManagerItem[uint32]) bool {
 		stats.TotalTasks++
 		if t.GetState() == task.TASK_STATE_DISPOSED {
 			if t.StopReason() == task.ErrTaskComplete {

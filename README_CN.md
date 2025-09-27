@@ -115,17 +115,8 @@ func (t *MyTask) Dispose() {
     t.Info("任务清理", "name", t.Name)
 }
 
-// TaskItem 实现ManagerItem接口的任务项
-type TaskItem struct {
-    task.ITask
-}
-
-func (ti *TaskItem) GetKey() uint32 {
-    return ti.GetTaskID()
-}
-
 // 使用gotask项目的根任务管理器
-type TaskManager = task.RootManager[uint32, *TaskItem]
+type TaskManager = task.RootManager[uint32, *MyTask]
 
 func main() {
     // 创建根任务管理器
@@ -134,7 +125,7 @@ func main() {
     
     // 创建并启动任务
     myTask := &MyTask{Name: "示例任务"}
-    root.AddTask(&TaskItem{myTask})
+    root.AddTask(myTask)
     
     // 等待任务完成
     myTask.WaitStopped()
@@ -151,28 +142,17 @@ func main() {
 
 **使用步骤**:
 
-1. **定义ManagerItem接口实现**:
+1. **创建RootManager实例**:
 ```go
-type TaskItem struct {
-    task.ITask
-}
-
-func (ti *TaskItem) GetKey() uint32 {
-    return ti.GetTaskID()
-}
-```
-
-2. **创建RootManager实例**:
-```go
-type TaskManager = task.RootManager[uint32, *TaskItem]
+type TaskManager = task.RootManager[uint32, *MyTask]
 root := &TaskManager{}
 root.Init()
 ```
 
-3. **添加任务**:
+2. **添加任务**:
 ```go
 myTask := &MyTask{Name: "示例任务"}
-root.AddTask(&TaskItem{myTask})
+root.AddTask(myTask)
 ```
 
 4. **优雅关闭**:

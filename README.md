@@ -115,17 +115,8 @@ func (t *MyTask) Dispose() {
     t.Info("Task cleanup", "name", t.Name)
 }
 
-// TaskItem implements the ManagerItem interface
-type TaskItem struct {
-    task.ITask
-}
-
-func (ti *TaskItem) GetKey() uint32 {
-    return ti.GetTaskID()
-}
-
 // Using the root task manager from gotask project
-type TaskManager = task.RootManager[uint32, *TaskItem]
+type TaskManager = task.RootManager[uint32, *MyTask]
 
 func main() {
     // Create root task manager
@@ -134,7 +125,7 @@ func main() {
     
     // Create and start task
     myTask := &MyTask{Name: "Example Task"}
-    root.AddTask(&TaskItem{myTask})
+    root.AddTask(myTask)
     
     // Wait for task completion
     myTask.WaitStopped()
@@ -151,28 +142,17 @@ func main() {
 
 **Usage Steps**:
 
-1. **Define ManagerItem interface implementation**:
+1. **Create RootManager instance**:
 ```go
-type TaskItem struct {
-    task.ITask
-}
-
-func (ti *TaskItem) GetKey() uint32 {
-    return ti.GetTaskID()
-}
-```
-
-2. **Create RootManager instance**:
-```go
-type TaskManager = task.RootManager[uint32, *TaskItem]
+type TaskManager = task.RootManager[uint32, *MyTask]
 root := &TaskManager{}
 root.Init()
 ```
 
-3. **Add tasks**:
+2. **Add tasks**:
 ```go
 myTask := &MyTask{Name: "Example Task"}
-root.AddTask(&TaskItem{myTask})
+root.AddTask(myTask)
 ```
 
 4. **Graceful shutdown**:
