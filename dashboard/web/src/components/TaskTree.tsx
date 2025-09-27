@@ -144,10 +144,10 @@ const TaskTreeComponent: React.FC = () => {
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
 
-    if (days > 0) return `${days}天 ${hours % 24}小时`;
-    if (hours > 0) return `${hours}小时 ${minutes % 60}分钟`;
-    if (minutes > 0) return `${minutes}分钟 ${seconds % 60}秒`;
-    return `${seconds}秒`;
+    if (days > 0) return `${days}${t("timeUnits.day")} ${hours % 24}${t("timeUnits.hour")}`;
+    if (hours > 0) return `${hours}${t("timeUnits.hour")} ${minutes % 60}${t("timeUnits.minute")}`;
+    if (minutes > 0) return `${minutes}${t("timeUnits.minute")} ${seconds % 60}${t("timeUnits.second")}`;
+    return `${seconds}${t("timeUnits.second")}`;
   };
 
   const columns: ColumnsType<TaskInfo> = [

@@ -1,0 +1,386 @@
+# Augment AI Rules for GoTask Project
+
+## Project Context
+GoTask is an asynchronous task management framework for Go that implements an "Everything is a Task" philosophy. It provides OS-like task manager capabilities with precise control over different granularity levels of system components.
+
+## Core Architectural Principles
+
+### 1. Single Goroutine Event Loop (CRITICAL)
+- **NEVER** create goroutines directly in task implementations
+- All child tasks execute sequentially in the parent task's goroutine
+- This eliminates race conditions and ensures predictable execution
+- Use `parent.AddTask(child)` instead of `go func()`
+
+### 2. Task Hierarchy and Lifecycle
+- Tasks form a tree structure with parent-child relationships
+- Each task has a unique ID for tracking and management
+- Use `RootManager` as the root task manager for signal handling
+- Implement proper `Start()`, `Run()`, and `Dispose()` methods
+
+### 3. Resource Management Philosophy
+- Framework handles cascading disposal automatically
+- Use `OnStop()` and `OnDispose()` hooks for cleanup
+- Implement graceful shutdown patterns
+- Never call `Start()` directly - it must be called by the parent task
+
+## Task Type System
+
+### task.Task (Base Task)
+- Use for simple, single-purpose tasks
+- Basic task implementation with lifecycle methods
+
+### task.Job (Container Task)
+- Can contain child tasks
+- Ends when all child tasks complete
+- Use for task coordinators and containers
+
+### task.Work (Persistent Task)
+- Similar to Job but continues after children complete
+- Use for background workers and long-running services
+
+### task.TickTask (Periodic Task)
+- Executes at regular intervals
+- Implement `GetTickInterval() time.Duration`
+- Use for timers, heartbeats, cleanup tasks
+
+### task.ChannelTask (Event-Driven Task)
+- Custom signal-based tasks
+- Override `GetSignal()` method
+- Use for event-driven and reactive tasks
+
+## Implementation Patterns
+
+### Standard Task Template
+```go
+type MyTask struct {
+    task.Task  // Choose appropriate type
+    // Task-specific fields
+    Name        string
+    Config      map[string]interface{}
+    Resources   []Resource
+}
+
+func (t *MyTask) Start() error {
+    // Resource initialization
+    t.Info("Task starting", "name", t.Name, "taskId", t.GetID())
+    
+    // Add resource dependencies
+    t.Using(t.Resources...)
+    
+    // OnStop: 用于关闭阻塞性资源（如端口监听、网络连接）
+    t.OnStop(func() {
+        // 关闭阻塞性资源，如 server.Close(), conn.Close()
+        server.Close()
+    })
+    
+    // OnDispose: 用于清理非阻塞性资源
+    t.OnDispose(func() {
+        // 清理其他资源，如缓存、文件句柄等
+        cache.Flush()
+    })
+    
+    return nil
+}
+
+func (t *MyTask) Run() error {
+    // Main task logic (blocking)
+    for !t.IsStopped() {
+        // Do work
+        if err := t.doWork(); err != nil {
+            return err
+        }
+    }
+    return t.StopReason()
+}
+
+func (t *MyTask) Dispose() {
+    // Resource cleanup
+    t.Info("Task disposing", "name", t.Name)
+    for _, resource := range t.Resources {
+        resource.Close()
+    }
+}
+```
+
+### RootManager Setup
+```go
+type TaskItem struct {
+    task.ITask
+}
+
+func (ti *TaskItem) GetKey() uint32 {
+    return ti.GetTaskID()
+}
+
+type TaskManager = task.RootManager[uint32, *TaskItem]
+
+func main() {
+    // Create root manager
+    root := &TaskManager{}
+    root.Init()
+    
+    // Add tasks
+    myTask := &MyTask{Name: "Example"}
+    root.AddTask(&TaskItem{myTask})
+    
+    // Wait for completion or handle signals
+    myTask.WaitStopped()
+    
+    // Graceful shutdown
+    root.Shutdown()
+}
+```
+
+## Task Execution Model
+- **Sequential Execution**: 子任务在父任务协程中顺序执行
+- **Blocking Behavior**: 如果子任务的Start或Run长时间运行，会阻塞其他子任务
+- **Use Cases**: 适合单个子任务重试、子任务排队执行
+- **Not Suitable**: 不适合多个子任务并行处理的场景
+- **Stop Method**: Stop()不能传入nil，必须提供停止原因
+
+## Error Handling and Resilience
+
+### Panic Management
+- Default mode: `go build` (captures panics, converts to errors)
+- Debug mode: `go build -tags taskpanic` (panics throw directly)
+- Always implement proper error handling in `Run()` methods
+
+### Retry Configuration
+```go
+func (t *MyTask) Start() error {
+    // Configure retry strategy
+    t.SetRetry(3, 5*time.Second)  // maxRetry, retryInterval
+    
+    // Retry logic:
+    // - Start failures: retry Start() until success
+    // - Run/Go failures: call Dispose(), then retry Start()
+    // - Stop conditions: ErrStopByUser, ErrExit, ErrTaskComplete
+    return nil
+}
+```
+
+## Common Use Cases and Patterns
+
+### 1. Network Service Management
+```go
+type HTTPService struct {
+    task.Job
+    Port     int
+    Server   *http.Server
+    Handlers map[string]http.HandlerFunc
+}
+
+func (h *HTTPService) Start() error {
+    h.Server = &http.Server{
+        Addr:    fmt.Sprintf(":%d", h.Port),
+        Handler: h.createMux(),
+    }
+    
+    h.OnStop(func() {
+        ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+        defer cancel()
+        h.Server.Shutdown(ctx)
+    })
+    
+    return nil
+}
+
+func (h *HTTPService) Run() error {
+    return h.Server.ListenAndServe()
+}
+```
+
+### 2. Periodic Maintenance Tasks
+```go
+type MaintenanceTask struct {
+    task.TickTask
+    Interval    time.Duration
+    CleanupFunc func() error
+}
+
+func (m *MaintenanceTask) GetTickInterval() time.Duration {
+    return m.Interval
+}
+
+func (m *MaintenanceTask) Run() error {
+    if err := m.CleanupFunc(); err != nil {
+        m.Error("Maintenance failed", "err", err)
+        return err
+    }
+    m.Info("Maintenance completed")
+    return nil
+}
+```
+
+### 3. Data Processing Pipeline
+```go
+type DataProcessor struct {
+    task.Task
+    Input     chan Data
+    Output    chan ProcessedData
+    Processor func(Data) ProcessedData
+}
+
+func (d *DataProcessor) Run() error {
+    for {
+        select {
+        case data, ok := <-d.Input:
+            if !ok {
+                return nil
+            }
+            if d.IsStopped() {
+                return d.StopReason()
+            }
+            
+            processed := d.Processor(data)
+            select {
+            case d.Output <- processed:
+            case <-d.Context().Done():
+                return d.Context().Err()
+            }
+            
+        case <-d.Context().Done():
+            return d.Context().Err()
+        }
+    }
+}
+```
+
+## Dashboard Integration
+
+### Backend Service (dashboard/server)
+- Go-based management service using GoTask
+- Provides RESTful APIs for task monitoring
+- Manages HTTP server lifecycle with GoTask
+
+### Frontend Interface (dashboard/web)
+- React + TypeScript management interface
+- Real-time task monitoring and control
+- Task tree visualization and history tracking
+
+## Development Guidelines
+
+### File Organization
+- Core framework in root directory
+- Dashboard components in `dashboard/` subdirectory
+- Utility functions in `util/` directory
+- Tests alongside source files
+
+### Logging Best Practices
+```go
+// Use structured logging with context
+t.Info("Task started", "name", t.Name, "taskId", t.GetID())
+t.Error("Operation failed", "err", err, "attempt", attempt)
+t.Debug("Processing data", "count", len(data), "type", dataType)
+```
+
+### Performance Monitoring
+```go
+func (t *MyTask) Dispose() {
+    duration := t.GetDuration()
+    t.Info("Task completed", "duration", duration, "taskId", t.GetID())
+}
+```
+
+## Anti-Patterns to Avoid
+
+1. **Direct goroutine creation in tasks**
+   ```go
+   // WRONG
+   go func() { /* task logic */ }()
+   
+   // CORRECT
+   parent.AddTask(childTask)
+   ```
+
+2. **Calling Start() directly**
+   ```go
+   // WRONG
+   task.Start()
+   
+   // CORRECT
+   parent.AddTask(task)
+   ```
+
+3. **Ignoring resource cleanup**
+   ```go
+   // WRONG
+   func (t *MyTask) Dispose() {
+       // Empty implementation
+   }
+   ```
+
+4. **Using global variables for task state**
+   ```go
+   // WRONG
+   var globalState map[string]interface{}
+   
+   // CORRECT
+   type MyTask struct {
+       task.Task
+       State map[string]interface{}
+   }
+   ```
+
+5. **Blocking operations without checking IsStopped()**
+   ```go
+   // WRONG
+   for {
+       // Do work without checking stop condition
+   }
+   
+   // CORRECT
+   for !t.IsStopped() {
+       // Do work
+   }
+   ```
+
+## Build and Deployment
+
+### Build Tags
+- Production: `go build` (panic handling enabled)
+- Development: `go build -tags taskpanic` (direct panic throwing)
+
+### Dependencies
+- Go 1.23+ required
+- Use `go mod tidy` for dependency management
+- Dashboard frontend uses pnpm for package management
+
+## Key API Methods
+
+### Task Management
+- `AddTask(t ITask)` - Add child task
+- `Stop(error)` - Stop task gracefully
+- `WaitStarted()` / `WaitStopped()` - Wait for state changes
+- `IsStopped()` - Check stop condition
+- `StopReason()` - Get stop reason
+
+### Resource Management
+- `Using(resources...)` - Add resource dependencies
+- `OnStop(callback)` - Set stop cleanup (用于关闭阻塞性资源)
+- `OnDispose(callback)` - Set dispose cleanup (用于清理非阻塞性资源)
+
+### Configuration
+- `SetRetry(max, interval)` - Configure retry behavior
+- `SetDescriptions(desc)` - Set task metadata
+- `GetDuration()` - Get execution time
+
+## When Assisting with GoTask
+
+### Always Remember:
+1. **Single goroutine principle** - Never create goroutines directly in tasks
+2. **Proper lifecycle management** - Implement Start, Run, and Dispose methods
+3. **Resource cleanup** - Use OnStop and OnDispose hooks appropriately
+4. **Error handling** - Handle errors gracefully and use retry mechanisms
+5. **Structured logging** - Use task's built-in logging with context
+6. **RootManager usage** - Always use RootManager as the root task manager
+
+### Code Generation Guidelines:
+- Always embed the appropriate task type
+- Include proper lifecycle methods
+- Add structured logging with task context
+- Implement error handling and retry logic
+- Use task's built-in methods for state management
+- Follow the single-goroutine event loop pattern
+
+Remember: GoTask provides predictable execution, proper resource management, and comprehensive observability. Always follow the single-goroutine principle and implement proper lifecycle methods for robust, maintainable code.

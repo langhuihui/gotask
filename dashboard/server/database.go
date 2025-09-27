@@ -1,99 +1,45 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
 	task "github.com/langhuihui/gotask"
-	_ "github.com/mattn/go-sqlite3"
+	_ "github.com/ncruces/go-sqlite3/embed"
+	"github.com/ncruces/go-sqlite3/gormlite"
+	"gorm.io/gorm"
 )
 
 // Database 数据库操作结构
 type Database struct {
-	db *sql.DB
+	db *gorm.DB
 }
 
 // NewDatabase 创建数据库连接
 func NewDatabase(dbPath string) (*Database, error) {
-	db, err := sql.Open("sqlite3", dbPath)
+	db, err := gorm.Open(gormlite.Open(dbPath), &gorm.Config{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
 	database := &Database{db: db}
 
-	// 创建表结构
-	if err := database.createTables(); err != nil {
-		return nil, fmt.Errorf("failed to create tables: %w", err)
+	// 自动迁移表结构
+	if err := database.autoMigrate(); err != nil {
+		return nil, fmt.Errorf("failed to migrate tables: %w", err)
 	}
 
 	return database, nil
 }
 
-// createTables 创建数据库表
-func (d *Database) createTables() error {
-	// 创建会话表
-	sessionTable := `
-	CREATE TABLE IF NOT EXISTS sessions (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		session_id TEXT UNIQUE NOT NULL,
-		start_time DATETIME NOT NULL,
-		end_time DATETIME,
-		pid INTEGER,
-		args TEXT
-	);`
-
-	// 创建任务历史表
-	taskHistoryTable := `
-	CREATE TABLE IF NOT EXISTS task_history (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		task_id INTEGER NOT NULL,
-		task_type INTEGER NOT NULL,
-		owner_type TEXT NOT NULL,
-		start_time DATETIME NOT NULL,
-		end_time DATETIME NOT NULL,
-		duration INTEGER NOT NULL, -- 存储纳秒
-		state INTEGER NOT NULL,
-		stop_reason TEXT,
-		retry_count INTEGER NOT NULL,
-		descriptions TEXT, -- JSON 格式存储
-		max_retry INTEGER NOT NULL,
-		parent_id INTEGER,
-		level INTEGER NOT NULL,
-		session_id TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-		FOREIGN KEY (session_id) REFERENCES sessions(session_id)
-	);`
-
-	// 创建索引
-	indexes := []string{
-		"CREATE INDEX IF NOT EXISTS idx_task_history_session_id ON task_history(session_id);",
-		"CREATE INDEX IF NOT EXISTS idx_task_history_task_id ON task_history(task_id);",
-		"CREATE INDEX IF NOT EXISTS idx_task_history_owner_type ON task_history(owner_type);",
-		"CREATE INDEX IF NOT EXISTS idx_task_history_start_time ON task_history(start_time);",
-		"CREATE INDEX IF NOT EXISTS idx_sessions_session_id ON sessions(session_id);",
-	}
-
-	// 执行表创建
-	if _, err := d.db.Exec(sessionTable); err != nil {
-		return fmt.Errorf("failed to create sessions table: %w", err)
-	}
-
-	if _, err := d.db.Exec(taskHistoryTable); err != nil {
-		return fmt.Errorf("failed to create task_history table: %w", err)
-	}
-
-	// 创建索引
-	for _, index := range indexes {
-		if _, err := d.db.Exec(index); err != nil {
-			return fmt.Errorf("failed to create index: %w", err)
-		}
-	}
-
-	return nil
+// autoMigrate 自动迁移数据库表结构
+func (d *Database) autoMigrate() error {
+	return d.db.AutoMigrate(
+		&SessionInfo{},
+		&TaskHistory{},
+	)
 }
 
 // CreateSession 创建新会话
@@ -101,12 +47,14 @@ func (d *Database) CreateSession(pid int, args string) (string, error) {
 	// 生成会话ID
 	sessionID := fmt.Sprintf("session-%d", time.Now().UnixNano())
 
-	query := `
-		INSERT INTO sessions (session_id, start_time, pid, args)
-		VALUES (?, ?, ?, ?)`
+	session := &SessionInfo{
+		SessionID: sessionID,
+		StartTime: time.Now(),
+		PID:       pid,
+		Args:      args,
+	}
 
-	_, err := d.db.Exec(query, sessionID, time.Now(), pid, args)
-	if err != nil {
+	if err := d.db.Create(session).Error; err != nil {
 		return "", fmt.Errorf("failed to create session: %w", err)
 	}
 
@@ -115,31 +63,13 @@ func (d *Database) CreateSession(pid int, args string) (string, error) {
 
 // GetSession 获取会话信息
 func (d *Database) GetSession(sessionID string) (*SessionInfo, error) {
-	query := `
-		SELECT session_id, start_time, end_time, pid, args
-		FROM sessions
-		WHERE session_id = ?`
-
 	var session SessionInfo
-	var endTime sql.NullTime
-
-	err := d.db.QueryRow(query, sessionID).Scan(
-		&session.ID,
-		&session.StartTime,
-		&endTime,
-		&session.PID,
-		&session.Args,
-	)
-
+	err := d.db.Where("session_id = ?", sessionID).First(&session).Error
 	if err != nil {
-		if err == sql.ErrNoRows {
+		if err == gorm.ErrRecordNotFound {
 			return nil, fmt.Errorf("session not found")
 		}
 		return nil, fmt.Errorf("failed to get session: %w", err)
-	}
-
-	if endTime.Valid {
-		session.EndTime = endTime.Time
 	}
 
 	return &session, nil
@@ -153,31 +83,25 @@ func (d *Database) SaveTaskHistory(history TaskHistory) error {
 		return fmt.Errorf("failed to marshal descriptions: %w", err)
 	}
 
-	query := `
-		INSERT INTO task_history (
-			task_id, task_type, owner_type, start_time, end_time, duration,
-			state, stop_reason, retry_count, descriptions, max_retry,
-			parent_id, level, session_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+	// 创建 GORM 模型
+	taskHistory := &TaskHistory{
+		TaskID:       history.TaskID,
+		Type:         history.Type,
+		OwnerType:    history.OwnerType,
+		StartTime:    history.StartTime,
+		EndTime:      history.EndTime,
+		Duration:     history.Duration,
+		State:        history.State,
+		StopReason:   history.StopReason,
+		RetryCount:   history.RetryCount,
+		Descriptions: string(descriptionsJSON),
+		MaxRetry:     history.MaxRetry,
+		ParentID:     history.ParentID,
+		Level:        history.Level,
+		SessionID:    history.SessionID,
+	}
 
-	_, err = d.db.Exec(query,
-		history.ID,
-		history.Type,
-		history.OwnerType,
-		history.StartTime,
-		history.EndTime,
-		history.Duration.Nanoseconds(),
-		history.State,
-		history.StopReason,
-		history.RetryCount,
-		string(descriptionsJSON),
-		history.MaxRetry,
-		history.ParentID,
-		history.Level,
-		history.SessionID,
-	)
-
-	if err != nil {
+	if err := d.db.Create(taskHistory).Error; err != nil {
 		return fmt.Errorf("failed to save task history: %w", err)
 	}
 
@@ -186,45 +110,37 @@ func (d *Database) SaveTaskHistory(history TaskHistory) error {
 
 // GetTaskHistory 获取任务历史记录
 func (d *Database) GetTaskHistory(filter TaskHistoryFilter) (TaskHistoryResponse, error) {
-	// 构建查询条件
-	whereClause := "WHERE 1=1"
-	args := []interface{}{}
+	// 构建查询
+	query := d.db.Model(&TaskHistory{})
 
+	// 应用过滤条件
 	if filter.OwnerType != "" {
-		whereClause += " AND owner_type = ?"
-		args = append(args, filter.OwnerType)
+		query = query.Where("owner_type = ?", filter.OwnerType)
 	}
 
 	if filter.TaskType != 0 {
-		whereClause += " AND task_type = ?"
-		args = append(args, filter.TaskType)
+		query = query.Where("task_type = ?", filter.TaskType)
 	}
 
 	if filter.SessionID != "" {
-		whereClause += " AND session_id = ?"
-		args = append(args, filter.SessionID)
+		query = query.Where("session_id = ?", filter.SessionID)
 	}
 
 	if filter.ParentID != nil {
-		whereClause += " AND parent_id = ?"
-		args = append(args, *filter.ParentID)
+		query = query.Where("parent_id = ?", *filter.ParentID)
 	}
 
 	if filter.StartTime != nil {
-		whereClause += " AND start_time >= ?"
-		args = append(args, *filter.StartTime)
+		query = query.Where("start_time >= ?", *filter.StartTime)
 	}
 
 	if filter.EndTime != nil {
-		whereClause += " AND start_time <= ?"
-		args = append(args, *filter.EndTime)
+		query = query.Where("start_time <= ?", *filter.EndTime)
 	}
 
 	// 获取总数
-	countQuery := "SELECT COUNT(*) FROM task_history " + whereClause
-	var total int
-	err := d.db.QueryRow(countQuery, args...).Scan(&total)
-	if err != nil {
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
 		return TaskHistoryResponse{}, fmt.Errorf("failed to count task history: %w", err)
 	}
 
@@ -238,76 +154,51 @@ func (d *Database) GetTaskHistory(filter TaskHistoryFilter) (TaskHistoryResponse
 		offset = 0
 	}
 
-	// 构建查询
-	query := `
-		SELECT task_id, task_type, owner_type, start_time, end_time, duration,
-			   state, stop_reason, retry_count, descriptions, max_retry,
-			   parent_id, level, session_id
-		FROM task_history ` + whereClause + `
-		ORDER BY start_time DESC
-		LIMIT ? OFFSET ?`
-
-	args = append(args, limit, offset)
-
-	rows, err := d.db.Query(query, args...)
+	// 查询数据
+	var taskHistories []TaskHistory
+	err := query.Order("start_time DESC").
+		Limit(limit).
+		Offset(offset).
+		Find(&taskHistories).Error
 	if err != nil {
 		return TaskHistoryResponse{}, fmt.Errorf("failed to query task history: %w", err)
 	}
-	defer rows.Close()
 
+	// 转换为响应格式
 	var tasks []TaskHistory
-	for rows.Next() {
-		var history TaskHistory
-		var descriptionsJSON string
-		var parentID sql.NullInt32
-
-		err := rows.Scan(
-			&history.ID,
-			&history.Type,
-			&history.OwnerType,
-			&history.StartTime,
-			&history.EndTime,
-			&history.Duration,
-			&history.State,
-			&history.StopReason,
-			&history.RetryCount,
-			&descriptionsJSON,
-			&history.MaxRetry,
-			&parentID,
-			&history.Level,
-			&history.SessionID,
-		)
-		if err != nil {
-			return TaskHistoryResponse{}, fmt.Errorf("failed to scan task history: %w", err)
-		}
-
-		// 转换 duration 从纳秒到 time.Duration
-		history.Duration = time.Duration(history.Duration)
-
+	for _, th := range taskHistories {
 		// 解析 descriptions JSON
-		if err := json.Unmarshal([]byte(descriptionsJSON), &history.Descriptions); err != nil {
-			log.Printf("Warning: failed to unmarshal descriptions for task %d: %v", history.ID, err)
-			history.Descriptions = make(map[string]string)
+		var descriptions map[string]string
+		if err := json.Unmarshal([]byte(th.Descriptions), &descriptions); err != nil {
+			log.Printf("Warning: failed to unmarshal descriptions for task %d: %v", th.TaskID, err)
+			descriptions = make(map[string]string)
 		}
 
-		// 设置 ParentID
-		if parentID.Valid {
-			history.ParentID = uint32(parentID.Int32)
+		task := TaskHistory{
+			TaskID:       th.TaskID,
+			Type:         th.Type,
+			OwnerType:    th.OwnerType,
+			StartTime:    th.StartTime,
+			EndTime:      th.EndTime,
+			Duration:     th.Duration,
+			State:        th.State,
+			StopReason:   th.StopReason,
+			RetryCount:   th.RetryCount,
+			Descriptions: th.Descriptions, // 保持为字符串格式
+			MaxRetry:     th.MaxRetry,
+			ParentID:     th.ParentID,
+			Level:        th.Level,
+			SessionID:    th.SessionID,
 		}
-
-		tasks = append(tasks, history)
+		tasks = append(tasks, task)
 	}
 
-	if err := rows.Err(); err != nil {
-		return TaskHistoryResponse{}, fmt.Errorf("error iterating task history: %w", err)
-	}
-
-	totalPages := (total + limit - 1) / limit
+	totalPages := (int(total) + limit - 1) / limit
 	page := offset/limit + 1
 
 	return TaskHistoryResponse{
 		Tasks:      tasks,
-		Total:      total,
+		Total:      int(total),
 		Page:       page,
 		PageSize:   limit,
 		TotalPages: totalPages,
@@ -319,111 +210,102 @@ func (d *Database) GetTaskHistoryStats(sessionID string) (map[string]interface{}
 	stats := make(map[string]interface{})
 
 	// 基本统计
-	countQuery := "SELECT COUNT(*) FROM task_history WHERE session_id = ?"
-	var totalTasks int
-	err := d.db.QueryRow(countQuery, sessionID).Scan(&totalTasks)
+	var totalTasks int64
+	err := d.db.Model(&TaskHistory{}).Where("session_id = ?", sessionID).Count(&totalTasks).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to count tasks: %w", err)
 	}
 
-	stats["totalTasks"] = totalTasks
+	stats["totalTasks"] = int(totalTasks)
 	stats["sessionId"] = sessionID
 
 	// 获取会话开始时间
-	sessionQuery := "SELECT start_time FROM sessions WHERE session_id = ?"
-	var sessionStart time.Time
-	err = d.db.QueryRow(sessionQuery, sessionID).Scan(&sessionStart)
+	var session SessionInfo
+	err = d.db.Where("session_id = ?", sessionID).First(&session).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get session start time: %w", err)
 	}
-	stats["sessionStartTime"] = sessionStart
+	stats["sessionStartTime"] = session.StartTime
 
 	// 按OwnerType统计
-	ownerTypeQuery := `
-		SELECT owner_type, COUNT(*) 
-		FROM task_history 
-		WHERE session_id = ? 
-		GROUP BY owner_type`
-
-	ownerTypeStats := make(map[string]int)
-	rows, err := d.db.Query(ownerTypeQuery, sessionID)
+	type OwnerTypeStat struct {
+		OwnerType string
+		Count     int64
+	}
+	var ownerTypeStats []OwnerTypeStat
+	err = d.db.Model(&TaskHistory{}).
+		Select("owner_type, COUNT(*) as count").
+		Where("session_id = ?", sessionID).
+		Group("owner_type").
+		Scan(&ownerTypeStats).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to query owner type stats: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var ownerType string
-		var count int
-		if err := rows.Scan(&ownerType, &count); err != nil {
-			return nil, fmt.Errorf("failed to scan owner type stats: %w", err)
-		}
-		ownerTypeStats[ownerType] = count
+	ownerTypeStatsMap := make(map[string]int)
+	for _, stat := range ownerTypeStats {
+		ownerTypeStatsMap[stat.OwnerType] = int(stat.Count)
 	}
-	stats["ownerTypeStats"] = ownerTypeStats
+	stats["ownerTypeStats"] = ownerTypeStatsMap
 
 	// 按TaskType统计
-	taskTypeQuery := `
-		SELECT task_type, COUNT(*) 
-		FROM task_history 
-		WHERE session_id = ? 
-		GROUP BY task_type`
-
-	taskTypeStats := make(map[string]int)
-	rows, err = d.db.Query(taskTypeQuery, sessionID)
+	type TaskTypeStat struct {
+		TaskType int
+		Count    int64
+	}
+	var taskTypeStats []TaskTypeStat
+	err = d.db.Model(&TaskHistory{}).
+		Select("task_type, COUNT(*) as count").
+		Where("session_id = ?", sessionID).
+		Group("task_type").
+		Scan(&taskTypeStats).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to query task type stats: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var taskType int
-		var count int
-		if err := rows.Scan(&taskType, &count); err != nil {
-			return nil, fmt.Errorf("failed to scan task type stats: %w", err)
-		}
-		taskTypeStats[TaskTypeToString(task.TaskType(taskType))] = count
+	taskTypeStatsMap := make(map[string]int)
+	for _, stat := range taskTypeStats {
+		taskTypeStatsMap[TaskTypeToString(task.TaskType(stat.TaskType))] = int(stat.Count)
 	}
-	stats["taskTypeStats"] = taskTypeStats
+	stats["taskTypeStats"] = taskTypeStatsMap
 
 	// 按状态统计
-	stateQuery := `
-		SELECT state, COUNT(*) 
-		FROM task_history 
-		WHERE session_id = ? 
-		GROUP BY state`
-
-	stateStats := make(map[string]int)
-	rows, err = d.db.Query(stateQuery, sessionID)
+	type StateStat struct {
+		State int
+		Count int64
+	}
+	var stateStats []StateStat
+	err = d.db.Model(&TaskHistory{}).
+		Select("state, COUNT(*) as count").
+		Where("session_id = ?", sessionID).
+		Group("state").
+		Scan(&stateStats).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to query state stats: %w", err)
 	}
-	defer rows.Close()
 
-	for rows.Next() {
-		var state int
-		var count int
-		if err := rows.Scan(&state, &count); err != nil {
-			return nil, fmt.Errorf("failed to scan state stats: %w", err)
-		}
-		stateStats[TaskStateToString(task.TaskState(state))] = count
+	stateStatsMap := make(map[string]int)
+	for _, stat := range stateStats {
+		stateStatsMap[TaskStateToString(task.TaskState(stat.State))] = int(stat.Count)
 	}
-	stats["stateStats"] = stateStats
+	stats["stateStats"] = stateStatsMap
 
 	// 总执行时间
-	durationQuery := "SELECT SUM(duration) FROM task_history WHERE session_id = ?"
-	var totalDurationNs sql.NullInt64
-	err = d.db.QueryRow(durationQuery, sessionID).Scan(&totalDurationNs)
+	var totalDurationNs int64
+	err = d.db.Model(&TaskHistory{}).
+		Select("COALESCE(SUM(duration), 0)").
+		Where("session_id = ?", sessionID).
+		Scan(&totalDurationNs).Error
 	if err != nil {
 		return nil, fmt.Errorf("failed to get total duration: %w", err)
 	}
 
-	if totalDurationNs.Valid {
-		totalDuration := time.Duration(totalDurationNs.Int64)
+	if totalDurationNs > 0 {
+		totalDuration := time.Duration(totalDurationNs)
 		stats["totalDuration"] = totalDuration.String()
 
 		if totalTasks > 0 {
-			avgDuration := time.Duration(int64(totalDuration) / int64(totalTasks))
+			avgDuration := time.Duration(int64(totalDuration) / totalTasks)
 			stats["averageDuration"] = avgDuration.String()
 		} else {
 			stats["averageDuration"] = "0s"
@@ -438,5 +320,9 @@ func (d *Database) GetTaskHistoryStats(sessionID string) (map[string]interface{}
 
 // Close 关闭数据库连接
 func (d *Database) Close() error {
-	return d.db.Close()
+	sqlDB, err := d.db.DB()
+	if err != nil {
+		return err
+	}
+	return sqlDB.Close()
 }

@@ -198,9 +198,27 @@ pnpm run dev
 
 Visit `http://localhost:5173` to view the task management interface.
 
+![Dashboard Screenshot](dashboard/snapshot.png)
+
 ---
 
 This project includes an independent task library (`github.com/langhuihui/gotask`), a React-based management interface, and an example backend program.
+
+## AI IDE Rules
+
+The project includes AI IDE rule files to help AI assistants understand the project structure and development guidelines:
+
+| File | Description | Purpose |
+|------|-------------|---------|
+| `ai_rules/Claude.md` | Claude AI Rules for GoTask Project | Comprehensive guidelines for AI assistants working with the GoTask framework, including architectural principles, task types, implementation patterns, and best practices |
+| `ai_rules/.github/copilot-rules.md` | GitHub Copilot Rules for GoTask Project | Rules for GitHub Copilot to generate GoTask-compliant code, including task type selection, lifecycle management, and anti-patterns to avoid |
+| `ai_rules/.cursor/rules/task.mdc` | GoTask Project Rules for Cursor AI | Cursor AI-specific guidelines for GoTask development, including task hierarchy, single goroutine event loop, and resource management patterns |
+| `ai_rules/.trae/rules/task.md` | Trae AI Rules for GoTask Project | Trae AI assistant rules for GoTask framework, covering task execution model, error handling, and common use cases |
+| `ai_rules/.windsurf/workflows/task.md` | Windsurf AI Rules for GoTask Project | Windsurf AI workflow rules for GoTask development, including implementation patterns, dashboard integration, and build guidelines |
+| `ai_rules/.codebuddy/.rules/task.mdc` | CodeBuddy (Tencent) Rules for GoTask Project | CodeBuddy AI assistant rules for GoTask framework, including task type system, implementation patterns, and development guidelines |
+| `ai_rules/.qoder/rules/task.md` | Qoder AI Rules for GoTask Project | Qoder AI assistant rules for GoTask framework, covering task execution model, error handling, and common use cases |
+| `ai_rules/.kiro/steering/task.md` | Kiro AI Rules for GoTask Project | Kiro AI assistant rules for GoTask framework, including task hierarchy, resource management, and anti-patterns to avoid |
+| `ai_rules/.augment-guidelines` | Augment AI Rules for GoTask Project | Augment AI assistant rules for GoTask framework, covering implementation patterns, dashboard integration, and build guidelines |
 
 ## Project Structure
 
@@ -216,6 +234,29 @@ gotask/
 ├── panic_true.go           # Panic mode configuration
 ├── task_test.go            # Task test file
 ├── go.mod                  # Go module file
+├── ai_rules/               # AI IDE rule files
+│   ├── Claude.md           # Claude AI assistant rules
+│   ├── .github/
+│   │   └── copilot-rules.md # GitHub Copilot rules
+│   ├── .cursor/
+│   │   └── rules/
+│   │       └── task.mdc    # Cursor AI rules
+│   ├── .trae/
+│   │   └── rules/
+│   │       └── task.md     # Trae AI rules
+│   ├── .windsurf/
+│   │   └── workflows/
+│   │       └── task.md     # Windsurf AI rules
+│   ├── .codebuddy/
+│   │   └── .rules/
+│   │       └── task.mdc    # CodeBuddy AI rules
+│   ├── .qoder/
+│   │   └── rules/
+│   │       └── task.md     # Qoder AI rules
+│   ├── .kiro/
+│   │   └── steering/
+│   │       └── task.md     # Kiro AI rules
+│   └── .augment-guidelines # Augment AI rules
 ├── util/
 │   └── promise.go          # Promise implementation
 └── dashboard/

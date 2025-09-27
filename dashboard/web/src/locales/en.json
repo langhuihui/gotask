@@ -106,5 +106,11 @@
     "endTime": "End Time",
     "pid": "Process ID",
     "args": "Start Arguments"
+  },
+  "timeUnits": {
+    "day": "d",
+    "hour": "h",
+    "minute": "m",
+    "second": "s"
   }
 }

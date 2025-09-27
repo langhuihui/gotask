@@ -4,6 +4,7 @@ import (
 	"time"
 
 	task "github.com/langhuihui/gotask"
+	"gorm.io/gorm"
 )
 
 type TaskInfo struct {
@@ -29,20 +30,21 @@ type TaskInfo struct {
 
 // TaskHistory 任务历史记录
 type TaskHistory struct {
-	ID           uint32            `json:"id"`
-	Type         task.TaskType     `json:"type"`
-	OwnerType    string            `json:"ownerType"`
-	StartTime    time.Time         `json:"startTime"`
-	EndTime      time.Time         `json:"endTime"`
-	Duration     time.Duration     `json:"duration"`
-	State        task.TaskState    `json:"state"`
-	StopReason   string            `json:"stopReason"`
-	RetryCount   int               `json:"retryCount"`
-	Descriptions map[string]string `json:"descriptions"`
-	MaxRetry     int               `json:"maxRetry"`
-	ParentID     uint32            `json:"parentId,omitempty"`
-	Level        uint32            `json:"level"`
-	SessionID    string            `json:"sessionId,omitempty"`
+	gorm.Model
+	TaskID       uint32         `json:"taskId" gorm:"column:task_id;not null"`
+	Type         task.TaskType  `json:"type" gorm:"column:task_type;not null"`
+	OwnerType    string         `json:"ownerType" gorm:"column:owner_type;not null"`
+	StartTime    time.Time      `json:"startTime" gorm:"column:start_time;not null"`
+	EndTime      time.Time      `json:"endTime" gorm:"column:end_time;not null"`
+	Duration     int64          `json:"duration" gorm:"column:duration;not null"` // 存储纳秒
+	State        task.TaskState `json:"state" gorm:"column:state;not null"`
+	StopReason   string         `json:"stopReason" gorm:"column:stop_reason"`
+	RetryCount   int            `json:"retryCount" gorm:"column:retry_count;not null"`
+	Descriptions string         `json:"descriptions" gorm:"column:descriptions;type:text"` // JSON 格式存储
+	MaxRetry     int            `json:"maxRetry" gorm:"column:max_retry;not null"`
+	ParentID     *uint32        `json:"parentId,omitempty" gorm:"column:parent_id"`
+	Level        uint32         `json:"level" gorm:"column:level;not null"`
+	SessionID    string         `json:"sessionId" gorm:"column:session_id;not null"`
 }
 
 // TaskHistoryFilter 任务历史过滤条件
@@ -68,11 +70,12 @@ type TaskHistoryResponse struct {
 
 // SessionInfo 会话信息
 type SessionInfo struct {
-	ID        string    `json:"id"`
-	StartTime time.Time `json:"startTime"`
-	EndTime   time.Time `json:"endTime,omitempty"`
-	PID       int       `json:"pid"`
-	Args      string    `json:"args"`
+	gorm.Model
+	SessionID string     `json:"sessionId" gorm:"column:session_id;uniqueIndex;not null"`
+	StartTime time.Time  `json:"startTime" gorm:"column:start_time;not null"`
+	EndTime   *time.Time `json:"endTime,omitempty" gorm:"column:end_time"`
+	PID       int        `json:"pid" gorm:"column:pid"`
+	Args      string     `json:"args" gorm:"column:args"`
 }
 
 // TaskStats 任务统计信息

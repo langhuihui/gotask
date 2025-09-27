@@ -198,9 +198,27 @@ pnpm run dev
 
 访问 `http://localhost:5173` 查看任务管理界面。
 
+![管理面板截图](dashboard/snapshot_CN.png)
+
 ---
 
 本项目包含了一个独立的任务库（`github.com/langhuihui/gotask`）、一个基于 React 的管理界面和一个示例后端程序。
+
+## AI IDE 规则
+
+项目包含了 AI IDE 规则文件，帮助 AI 助手理解项目结构和开发指南：
+
+| 文件 | 描述 | 用途 |
+|------|------|------|
+| `ai_rules/Claude.md` | GoTask 项目的 Claude AI 规则 | 为 AI 助手提供 GoTask 框架的架构原则、任务类型、实现模式和最佳实践的全面指南 |
+| `ai_rules/.github/copilot-rules.md` | GoTask 项目的 GitHub Copilot 规则 | 为 GitHub Copilot 生成符合 GoTask 规范的代码，包括任务类型选择、生命周期管理和反模式避免 |
+| `ai_rules/.cursor/rules/task.mdc` | GoTask 项目的 Cursor AI 规则 | Cursor AI 的 GoTask 开发指南，包括任务层次结构、单协程事件循环和资源管理模式 |
+| `ai_rules/.trae/rules/task.md` | GoTask 项目的 Trae AI 规则 | Trae AI 助手的 GoTask 框架规则，涵盖任务执行模型、错误处理和常见用例 |
+| `ai_rules/.windsurf/workflows/task.md` | GoTask 项目的 Windsurf AI 规则 | Windsurf AI 的 GoTask 开发工作流规则，包括实现模式、仪表板集成和构建指南 |
+| `ai_rules/.codebuddy/.rules/task.mdc` | GoTask 项目的 CodeBuddy（腾讯）规则 | CodeBuddy AI 助手的 GoTask 框架规则，包括任务类型系统、实现模式和开发指南 |
+| `ai_rules/.qoder/rules/task.md` | GoTask 项目的 Qoder AI 规则 | Qoder AI 助手的 GoTask 框架规则，涵盖任务执行模型、错误处理和常见用例 |
+| `ai_rules/.kiro/steering/task.md` | GoTask 项目的 Kiro AI 规则 | Kiro AI 助手的 GoTask 框架规则，包括任务层次结构、资源管理和反模式避免 |
+| `ai_rules/.augment-guidelines` | GoTask 项目的 Augment AI 规则 | Augment AI 助手的 GoTask 框架规则，涵盖实现模式、仪表板集成和构建指南 |
 
 ## 项目结构
 
@@ -216,6 +234,29 @@ gotask/
 ├── panic_true.go           # panic模式配置
 ├── task_test.go            # 任务测试文件
 ├── go.mod                  # Go 模块文件
+├── ai_rules/               # AI IDE 规则文件
+│   ├── Claude.md           # Claude AI 助手规则
+│   ├── .github/
+│   │   └── copilot-rules.md # GitHub Copilot 规则
+│   ├── .cursor/
+│   │   └── rules/
+│   │       └── task.mdc    # Cursor AI 规则
+│   ├── .trae/
+│   │   └── rules/
+│   │       └── task.md     # Trae AI 规则
+│   ├── .windsurf/
+│   │   └── workflows/
+│   │       └── task.md     # Windsurf AI 规则
+│   ├── .codebuddy/
+│   │   └── .rules/
+│   │       └── task.mdc    # CodeBuddy AI 规则
+│   ├── .qoder/
+│   │   └── rules/
+│   │       └── task.md     # Qoder AI 规则
+│   ├── .kiro/
+│   │   └── steering/
+│   │       └── task.md     # Kiro AI 规则
+│   └── .augment-guidelines # Augment AI 规则
 ├── util/
 │   └── promise.go          # Promise 实现
 └── dashboard/

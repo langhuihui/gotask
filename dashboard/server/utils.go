@@ -1,11 +1,11 @@
 package main
 
-import . "github.com/langhuihui/gotask"
+import task "github.com/langhuihui/gotask"
 
 // BuildTaskTree 构建任务树（参考 monibuca 的 TaskTree 方法）
-func BuildTaskTree(root ITask) *TaskInfo {
-	var fillData func(m ITask) *TaskInfo
-	fillData = func(m ITask) (res *TaskInfo) {
+func BuildTaskTree(root task.ITask) *TaskInfo {
+	var fillData func(m task.ITask) *TaskInfo
+	fillData = func(m task.ITask) (res *TaskInfo) {
 		if m == nil {
 			return
 		}
@@ -30,7 +30,7 @@ func BuildTaskTree(root ITask) *TaskInfo {
 		}
 
 		// 处理 Job 类型的任务
-		if job, ok := m.(IJob); ok {
+		if job, ok := m.(task.IJob); ok {
 			// 处理阻塞任务
 			if blockedTask := job.Blocked(); blockedTask != nil {
 				res.Blocked = fillData(blockedTask)
@@ -38,7 +38,7 @@ func BuildTaskTree(root ITask) *TaskInfo {
 			res.EventLoopRunning = job.EventLoopRunning()
 
 			// 递归处理子任务
-			job.RangeSubTask(func(child ITask) bool {
+			job.RangeSubTask(func(child task.ITask) bool {
 				childInfo := fillData(child)
 				if childInfo == nil {
 					return true
@@ -53,28 +53,28 @@ func BuildTaskTree(root ITask) *TaskInfo {
 }
 
 // GetTaskInfo 获取任务信息（简化版本）
-func GetTaskInfo(task ITask) *TaskInfo {
-	t := task.GetTask()
+func GetTaskInfo(taskItem task.ITask) *TaskInfo {
+	t := taskItem.GetTask()
 	info := &TaskInfo{
-		ID:               task.GetTaskID(),
-		Type:             task.GetTaskType(),
-		OwnerType:        task.GetOwnerType(),
-		State:            task.GetState(),
-		Level:            uint32(task.GetLevel()),
+		ID:               taskItem.GetTaskID(),
+		Type:             taskItem.GetTaskType(),
+		OwnerType:        taskItem.GetOwnerType(),
+		State:            taskItem.GetState(),
+		Level:            uint32(taskItem.GetLevel()),
 		StartTime:        t.StartTime,
 		StartReason:      t.StartReason,
-		Descriptions:     task.GetDescriptions(),
+		Descriptions:     taskItem.GetDescriptions(),
 		Pointer:          uint64(t.GetTaskPointer()),
 		EventLoopRunning: false,
 		RetryCount:       t.GetRetryCount(),
 		MaxRetry:         t.GetMaxRetry(),
 	}
 
-	if task.IsStopped() {
-		info.StopReason = task.StopReason().Error()
+	if taskItem.IsStopped() {
+		info.StopReason = taskItem.StopReason().Error()
 	}
 
-	if job, ok := task.(IJob); ok {
+	if job, ok := taskItem.(task.IJob); ok {
 		info.EventLoopRunning = job.EventLoopRunning()
 		if blockedTask := job.Blocked(); blockedTask != nil {
 			info.Blocked = GetTaskInfo(blockedTask)
@@ -135,21 +135,21 @@ func FlattenTaskTree(tree *TaskInfo) []*TaskInfo {
 }
 
 // TaskStateToString 任务状态转字符串
-func TaskStateToString(state TaskState) string {
+func TaskStateToString(state task.TaskState) string {
 	switch state {
-	case TASK_STATE_INIT:
+	case task.TASK_STATE_INIT:
 		return "INIT"
-	case TASK_STATE_STARTING:
+	case task.TASK_STATE_STARTING:
 		return "STARTING"
-	case TASK_STATE_STARTED:
+	case task.TASK_STATE_STARTED:
 		return "STARTED"
-	case TASK_STATE_RUNNING:
+	case task.TASK_STATE_RUNNING:
 		return "RUNNING"
-	case TASK_STATE_GOING:
+	case task.TASK_STATE_GOING:
 		return "GOING"
-	case TASK_STATE_DISPOSING:
+	case task.TASK_STATE_DISPOSING:
 		return "DISPOSING"
-	case TASK_STATE_DISPOSED:
+	case task.TASK_STATE_DISPOSED:
 		return "DISPOSED"
 	default:
 		return "UNKNOWN"
@@ -157,15 +157,15 @@ func TaskStateToString(state TaskState) string {
 }
 
 // TaskTypeToString 任务类型转字符串
-func TaskTypeToString(taskType TaskType) string {
+func TaskTypeToString(taskType task.TaskType) string {
 	switch taskType {
-	case TASK_TYPE_TASK:
+	case task.TASK_TYPE_TASK:
 		return "TASK"
-	case TASK_TYPE_JOB:
+	case task.TASK_TYPE_JOB:
 		return "JOB"
-	case TASK_TYPE_Work:
+	case task.TASK_TYPE_Work:
 		return "WORK"
-	case TASK_TYPE_CHANNEL:
+	case task.TASK_TYPE_CHANNEL:
 		return "CHANNEL"
 	default:
 		return "UNKNOWN"

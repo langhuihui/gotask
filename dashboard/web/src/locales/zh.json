@@ -106,5 +106,11 @@
     "endTime": "结束时间",
     "pid": "进程ID",
     "args": "启动参数"
+  },
+  "timeUnits": {
+    "day": "天",
+    "hour": "小时",
+    "minute": "分钟",
+    "second": "秒"
   }
 }

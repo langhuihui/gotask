@@ -187,16 +187,19 @@ func (s *Server) saveTask(task task.ITask) {
 		return
 	}
 
+	// 将 descriptions 转换为 JSON 字符串
+	descriptionsJSON, _ := json.Marshal(task.GetDescriptions())
+
 	history := TaskHistory{
-		ID:           task.GetTaskID(),
+		TaskID:       task.GetTaskID(),
 		Type:         task.GetTaskType(),
 		OwnerType:    task.GetOwnerType(),
 		StartTime:    task.GetTask().StartTime,
 		EndTime:      time.Now(),
-		Duration:     time.Since(task.GetTask().StartTime),
+		Duration:     time.Since(task.GetTask().StartTime).Nanoseconds(),
 		State:        task.GetState(),
 		RetryCount:   task.GetTask().GetRetryCount(),
-		Descriptions: task.GetDescriptions(),
+		Descriptions: string(descriptionsJSON),
 		MaxRetry:     task.GetTask().GetMaxRetry(),
 		Level:        uint32(task.GetLevel()),
 		SessionID:    s.sessionID,
@@ -204,7 +207,8 @@ func (s *Server) saveTask(task task.ITask) {
 
 	// 设置父任务ID
 	if parent := task.GetParent(); parent != nil {
-		history.ParentID = parent.GetTaskID()
+		parentID := parent.GetTaskID()
+		history.ParentID = &parentID
 	}
 
 	if task.StopReason() != nil {
@@ -216,7 +220,7 @@ func (s *Server) saveTask(task task.ITask) {
 		log.Printf("Failed to save task history: %v", err)
 	} else {
 		log.Printf("Task saved to history: ID=%d, Type=%s, Duration=%v, Session=%s",
-			history.ID, history.OwnerType, history.Duration, history.SessionID)
+			history.TaskID, history.OwnerType, time.Duration(history.Duration), history.SessionID)
 	}
 }
 
@@ -273,17 +277,19 @@ func (s *Server) getSessionInfo() SessionInfo {
 	session, err := s.database.GetSession(s.sessionID)
 	if err != nil {
 		log.Printf("Failed to get session info: %v", err)
+		endTime := time.Now()
 		return SessionInfo{
-			ID:        s.sessionID,
+			SessionID: s.sessionID,
 			StartTime: s.sessionStart,
-			EndTime:   time.Now(),
+			EndTime:   &endTime,
 			PID:       os.Getpid(),
 			Args:      strings.Join(os.Args, " "),
 		}
 	}
 
 	// 更新结束时间
-	session.EndTime = time.Now()
+	endTime := time.Now()
+	session.EndTime = &endTime
 	return *session
 }
 
