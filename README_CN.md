@@ -9,6 +9,49 @@
 
 > 一个基于 Go 语言的异步任务管理框架，提供类似操作系统任务管理器的精确控制能力
 
+## 目录
+
+- [项目目的](#项目目的)
+  - [核心理念](#核心理念)
+  - [解决的核心问题](#解决的核心问题)
+  - [九大核心特性](#九大核心特性)
+  - [适用场景](#适用场景)
+- [快速开始](#快速开始)
+  - [安装](#安装)
+  - [构建选项](#构建选项)
+  - [基本使用](#基本使用)
+  - [RootManager 使用说明](#rootmanager-使用说明)
+  - [管理面板](#管理面板)
+- [AI IDE 规则](#ai-ide-规则)
+- [项目结构](#项目结构)
+- [功能特性](#功能特性)
+  - [九大核心特性](#九大核心特性-1)
+  - [九大核心特性详解](#九大核心特性详解)
+- [使用指南](#使用指南)
+  - [条件编译参数](#条件编译参数)
+  - [任务启动](#任务启动)
+  - [EventLoop 机制](#eventloop-机制)
+  - [任务停止](#任务停止)
+  - [任务管理API](#任务管理api)
+  - [竞态条件处理](#竞态条件处理)
+- [管理面板](#管理面板-1)
+  - [后端服务 (dashboard/server)](#后端服务-dashboardserver)
+  - [前端界面 (dashboard/web)](#前端界面-dashboardweb)
+  - [快速开始](#快速开始-1)
+  - [项目结构说明](#项目结构说明)
+  - [一键启动](#一键启动)
+- [教学课程](#教学课程)
+  - [课程结构](#课程结构)
+  - [如何使用课程](#如何使用课程)
+  - [课程特色](#课程特色)
+  - [学习建议](#学习建议)
+- [贡献](#贡献)
+  - [贡献方式](#贡献方式)
+- [许可证](#许可证)
+- [致谢](#致谢)
+- [相关链接](#相关链接)
+- [支持](#支持)
+
 ## 项目目的
 
 GoTask 是一个基于 Go 语言的异步任务管理框架，旨在解决复杂项目中的任务管理难题。我们相信**一切皆任务**，无论是网络连接、数据处理、定时任务还是业务流程，都可以抽象为任务进行统一管理。
@@ -239,50 +282,10 @@ gotask/
 │   └── .augment-guidelines # Augment AI 规则
 ├── util/
 │   └── promise.go          # Promise 实现
+├── lessons/                # 教学课程
 └── dashboard/
     ├── server/             # 后端管理服务
-    │   ├── main.go         # 主程序入口
-    │   ├── database.go     # 数据库操作
-    │   ├── types.go        # 数据类型定义
-    │   ├── utils.go        # 工具函数
-    │   ├── go.mod          # Go 模块文件
-    │   └── go.sum          # 依赖校验文件
-    ├── start.sh            # 启动脚本
-    └── web/                # Vite React 前端项目
-        ├── src/
-        │   ├── components/ # React 组件
-        │   │   ├── LanguageSwitcher.tsx  # 语言切换组件
-        │   │   ├── Logo.tsx             # Logo组件
-        │   │   ├── TaskDetail.tsx       # 任务详情组件
-        │   │   ├── TaskHistoryView.tsx  # 任务历史视图
-        │   │   └── TaskTree.tsx         # 任务树组件
-        │   ├── hooks/      # React Hooks
-        │   │   └── useLanguage.ts       # 语言Hook
-        │   ├── i18n/       # 国际化
-        │   │   └── index.ts             # 国际化配置
-        │   ├── locales/    # 语言包
-        │   │   ├── en.json             # 英文语言包
-        │   │   └── zh.json             # 中文语言包
-        │   ├── services/   # API 服务
-        │   │   └── api.ts              # API接口
-        │   ├── types/      # TypeScript 类型定义
-        │   │   └── task.ts             # 任务类型定义
-        │   ├── assets/     # 静态资源
-        │   │   ├── logo-go.svg         # Go Logo
-        │   │   ├── logo-simple.svg     # 简化Logo
-        │   │   └── react.svg           # React Logo
-        │   ├── App.tsx     # 主应用组件
-        │   ├── App.css     # 主应用样式
-        │   ├── main.tsx    # 应用入口
-        │   └── index.css   # 全局样式
-        ├── public/         # 公共资源
-        │   └── vite.svg    # Vite Logo
-        ├── dist/           # 构建输出目录
-        ├── package.json    # 项目配置
-        ├── pnpm-lock.yaml  # pnpm 锁定文件
-        ├── vite.config.ts  # Vite 配置
-        ├── tsconfig.json   # TypeScript 配置
-        └── eslint.config.js # ESLint 配置
+    └── web/                # React 前端管理界面
 ```
 
 ## 功能特性
@@ -1107,20 +1110,7 @@ pnpm run lint         # 代码检查
 ```
 dashboard/
 ├── server/                 # Go后端管理服务
-│   ├── main.go            # 主程序入口
-│   ├── database.go        # 数据库操作
-│   ├── types.go           # 数据类型定义
-│   ├── utils.go           # 工具函数
-│   └── go.mod             # Go模块依赖
-├── web/                   # React前端管理界面
-│   ├── src/
-│   │   ├── components/    # React组件
-│   │   ├── services/      # API服务
-│   │   ├── types/         # TypeScript类型
-│   │   └── locales/       # 国际化文件
-│   ├── package.json       # 项目配置
-│   └── vite.config.ts     # Vite配置
-└── start.sh              # 一键启动脚本
+└── web/                   # React前端管理界面
 ```
 
 ### 一键启动
@@ -1136,6 +1126,63 @@ chmod +x dashboard/start.sh
 ```
 
 该脚本会自动启动后端服务和前端开发服务器，并打开浏览器访问管理界面。
+
+## 教学课程
+
+GoTask 项目提供了完整的教学课程系统，位于 `lessons/` 目录下。该系统包含10个渐进式课程，从基础到高级，帮助开发者全面掌握 GoTask 框架。
+
+### 课程结构
+
+#### 基础课程 (Lesson 1-3)
+- **Lesson 1**: 基础Task使用 - 学习最基本的任务定义和执行
+- **Lesson 2**: Job容器管理 - 学习如何管理多个子任务
+- **Lesson 3**: Work长期运行任务 - 学习异步任务的执行
+
+#### 中级课程 (Lesson 4-6)
+- **Lesson 4**: ChannelTask通道任务 - 学习任务间通信
+- **Lesson 5**: TickTask定时任务 - 学习定时器任务
+- **Lesson 6**: RootManager根任务管理 - 学习应用程序级管理
+
+#### 高级课程 (Lesson 7-9)
+- **Lesson 7**: 资源管理与清理 - 学习资源生命周期管理
+- **Lesson 8**: 重试机制 - 学习错误恢复策略
+- **Lesson 9**: 事件监听与回调 - 学习任务间协作
+
+#### 综合应用 (Lesson 10)
+- **Lesson 10**: 综合应用案例 - 完整应用程序示例
+
+### 如何使用课程
+
+1. **按顺序学习**：建议按照课程编号顺序学习，每个课程都建立在前一个课程的基础上
+
+2. **动手实践**：每个课程都包含TODO注释，你需要：
+   - 阅读课程说明
+   - 按照TODO注释的提示取消注释
+   - 运行程序验证结果
+   - 理解每个概念的作用
+
+3. **运行课程**：
+   ```bash
+   # 进入课程目录
+   cd lessons/lesson01
+   
+   # 运行课程
+   go run main.go
+   ```
+
+### 课程特色
+
+- **渐进式设计**：从简单到复杂，循序渐进
+- **实践导向**：每个课程都是可运行的完整程序
+- **全面覆盖**：涵盖GoTask框架的所有核心功能
+- **错误提示**：当用户未完成TODO时，会显示明确的错误信息
+
+### 学习建议
+
+1. **理解概念**：不要只是取消注释，要理解每个方法的作用和适用场景
+2. **实验修改**：尝试修改参数，观察不同的行为，加深理解
+3. **查看源码**：结合GoTask框架的源码，理解内部实现机制
+4. **构建项目**：学完所有课程后，尝试构建自己的项目
 
 ## 贡献
 

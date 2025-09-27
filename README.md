@@ -9,6 +9,50 @@
 
 > An asynchronous task management framework based on Go language, providing precise control capabilities similar to an operating system task manager
 
+## Table of Contents
+
+- [Project Purpose](#project-purpose)
+  - [Core Philosophy](#core-philosophy)
+  - [Core Problems Solved](#core-problems-solved)
+  - [Nine Core Features](#nine-core-features)
+  - [Use Cases](#use-cases)
+- [Quick Start](#quick-start)
+  - [Installation](#installation)
+  - [Build Options](#build-options)
+  - [Basic Usage](#basic-usage)
+  - [RootManager Usage Guide](#rootmanager-usage-guide)
+  - [Dashboard](#dashboard)
+- [AI IDE Rules](#ai-ide-rules)
+- [Project Structure](#project-structure)
+- [Features](#features)
+  - [Nine Core Features](#nine-core-features-1)
+- [Usage Guide](#usage-guide)
+  - [Conditional Compilation Parameters](#conditional-compilation-parameters)
+  - [Task Startup](#task-startup)
+  - [EventLoop Mechanism](#eventloop-mechanism)
+  - [Task Stopping](#task-stopping)
+- [Task Management API](#task-management-api)
+  - [Task Public Methods](#task-public-methods)
+  - [Job Public Methods](#job-public-methods)
+  - [Global Functions](#global-functions)
+  - [Race Condition Handling](#race-condition-handling)
+- [Dashboard](#dashboard-1)
+  - [Backend Service (dashboard/server)](#backend-service-dashboardserver)
+  - [Frontend Interface (dashboard/web)](#frontend-interface-dashboardweb)
+  - [Quick Start](#quick-start-1)
+  - [One-click Startup](#one-click-startup)
+- [Tutorial Lessons](#tutorial-lessons)
+  - [Course Structure](#course-structure)
+  - [How to Use the Lessons](#how-to-use-the-lessons)
+  - [Course Features](#course-features)
+  - [Learning Recommendations](#learning-recommendations)
+- [Contribution](#contribution)
+  - [Contribution Methods](#contribution-methods)
+- [License](#license)
+- [Acknowledgements](#acknowledgements)
+- [Related Links](#related-links)
+- [Support](#support)
+
 ## Project Purpose
 
 GoTask is an asynchronous task management framework based on Go language, designed to solve task management challenges in complex projects. We believe that **everything is a task**, whether it's network connections, data processing, scheduled tasks, or business processes, all can be abstracted as tasks for unified management.
@@ -239,50 +283,10 @@ gotask/
 │   └── .augment-guidelines # Augment AI rules
 ├── util/
 │   └── promise.go          # Promise implementation
+├── lessons/                # Tutorial lessons
 └── dashboard/
     ├── server/             # Backend management service
-    │   ├── main.go         # Main program entry
-    │   ├── database.go     # Database operations
-    │   ├── types.go        # Data type definitions
-    │   ├── utils.go        # Utility functions
-    │   ├── go.mod          # Go module file
-    │   └── go.sum          # Dependency verification file
-    ├── start.sh            # Startup script
-    └── web/                # Vite React frontend project
-        ├── src/
-        │   ├── components/ # React components
-        │   │   ├── LanguageSwitcher.tsx  # Language switcher component
-        │   │   ├── Logo.tsx             # Logo component
-        │   │   ├── TaskDetail.tsx       # Task detail component
-        │   │   ├── TaskHistoryView.tsx  # Task history view
-        │   │   └── TaskTree.tsx         # Task tree component
-        │   ├── hooks/      # React Hooks
-        │   │   └── useLanguage.ts       # Language Hook
-        │   ├── i18n/       # Internationalization
-        │   │   └── index.ts             # i18n configuration
-        │   ├── locales/    # Language packs
-        │   │   ├── en.json             # English language pack
-        │   │   └── zh.json             # Chinese language pack
-        │   ├── services/   # API services
-        │   │   └── api.ts              # API interface
-        │   ├── types/      # TypeScript type definitions
-        │   │   └── task.ts             # Task type definitions
-        │   ├── assets/     # Static resources
-        │   │   ├── logo-go.svg         # Go Logo
-        │   │   ├── logo-simple.svg     # Simplified Logo
-        │   │   └── react.svg           # React Logo
-        │   ├── App.tsx     # Main application component
-        │   ├── App.css     # Main application style
-        │   ├── main.tsx    # Application entry
-        │   └── index.css   # Global style
-        ├── public/         # Public resources
-        │   └── vite.svg    # Vite Logo
-        ├── dist/           # Build output directory
-        ├── package.json    # Project configuration
-        ├── pnpm-lock.yaml  # pnpm lock file
-        ├── vite.config.ts  # Vite configuration
-        ├── tsconfig.json   # TypeScript configuration
-        └── eslint.config.js # ESLint configuration
+    └── web/                # React frontend management interface
 ```
 
 ## Features
@@ -548,6 +552,63 @@ chmod +x dashboard/start.sh
 ```
 
 This script automatically starts the backend service and frontend development server, and opens the browser to access the management interface.
+
+## Tutorial Lessons
+
+The GoTask project provides a complete tutorial lesson system located in the `lessons/` directory. This system contains 10 progressive lessons, from basic to advanced, helping developers fully master the GoTask framework.
+
+### Course Structure
+
+#### Basic Courses (Lesson 1-3)
+- **Lesson 1**: Basic Task Usage - Learn the most basic task definition and execution
+- **Lesson 2**: Job Container Management - Learn how to manage multiple child tasks
+- **Lesson 3**: Work Long-running Tasks - Learn asynchronous task execution
+
+#### Intermediate Courses (Lesson 4-6)
+- **Lesson 4**: ChannelTask Communication - Learn inter-task communication
+- **Lesson 5**: TickTask Scheduled Tasks - Learn timer tasks
+- **Lesson 6**: RootManager Application Management - Learn application-level management
+
+#### Advanced Courses (Lesson 7-9)
+- **Lesson 7**: Resource Management and Cleanup - Learn resource lifecycle management
+- **Lesson 8**: Retry Mechanism - Learn error recovery strategies
+- **Lesson 9**: Event Listening and Callbacks - Learn inter-task collaboration
+
+#### Comprehensive Application (Lesson 10)
+- **Lesson 10**: Comprehensive Application Example - Complete application example
+
+### How to Use the Lessons
+
+1. **Learn in Order**: It's recommended to learn in lesson number order, as each lesson builds upon the previous one
+
+2. **Hands-on Practice**: Each lesson contains TODO comments. You need to:
+   - Read the lesson description
+   - Uncomment according to TODO comment instructions
+   - Run the program to verify results
+   - Understand the role of each concept
+
+3. **Run Lessons**:
+   ```bash
+   # Enter lesson directory
+   cd lessons/lesson01
+   
+   # Run lesson
+   go run main.go
+   ```
+
+### Course Features
+
+- **Progressive Design**: From simple to complex, step by step
+- **Practice-oriented**: Each lesson is a runnable complete program
+- **Comprehensive Coverage**: Covers all core features of the GoTask framework
+- **Error Hints**: Shows clear error messages when users haven't completed TODOs
+
+### Learning Recommendations
+
+1. **Understand Concepts**: Don't just uncomment, understand the role and applicable scenarios of each method
+2. **Experiment with Modifications**: Try modifying parameters, observe different behaviors, deepen understanding
+3. **View Source Code**: Combine with GoTask framework source code to understand internal implementation mechanisms
+4. **Build Projects**: After completing all lessons, try building your own projects
 
 ## Contribution
 
