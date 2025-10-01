@@ -282,7 +282,7 @@ gotask/
 │   └── .augment-guidelines # Augment AI 规则
 ├── util/
 │   └── promise.go          # Promise 实现
-├── lessons/                # 教学课程
+├── lessons_CN/                # 教学课程
 └── dashboard/
     ├── server/             # 后端管理服务
     └── web/                # React 前端管理界面

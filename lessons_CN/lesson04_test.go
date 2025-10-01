@@ -7,7 +7,7 @@ import (
 	task "github.com/langhuihui/gotask"
 )
 
-// MessageTask Message processing task
+// MessageTask 消息处理任务
 type MessageTask struct {
 	task.ChannelTask
 	ProcessedCount int
@@ -19,18 +19,18 @@ func (t *MessageTask) Tick(signal any) {
 	}
 }
 
-// ProcessMessage Process received message
+// ProcessMessage 处理接收到的消息
 func (t *MessageTask) ProcessMessage(msg string) {
-	// Mark message as processed
+	// 标记消息已处理
 	t.ProcessedCount++
 }
 
-// ProcessedCount Record processed message count
+// ProcessedCount 记录处理的消息数量
 func (t *MessageTask) GetProcessedCount() int {
 	return t.ProcessedCount
 }
 
-// MessageProducer Message producer
+// MessageProducer 消息生产者
 type MessageProducer struct {
 	task.Task
 	MessageChan chan string
@@ -45,42 +45,42 @@ func (p *MessageProducer) Run() error {
 	return nil
 }
 
-// TestLesson04 Test ChannelTask communication tasks
+// TestLesson04 测试ChannelTask通道任务
 func TestLesson04(t *testing.T) {
-	t.Log("=== Lesson 4: ChannelTask Communication Tasks ===")
-	t.Log("Learning Objective: Understand ChannelTask's message processing mechanism")
-	t.Log("Task: Uncomment t.ProcessMessage(msg) in MessageTask.Tick() and delete _ = msg")
-	t.Log("If code not modified, test will fail!")
+	t.Log("=== Lesson 4: ChannelTask通道任务 ===")
+	t.Log("学习目标：理解ChannelTask的消息处理机制")
+	t.Log("任务：在MessageTask.Tick()中取消注释 t.ProcessMessage(msg) 并删除 _ = msg")
+	t.Log("如果不修改代码，测试将失败！")
 	messageChan := make(chan string, 10)
-	// Create message processing task
+	// 创建消息处理任务
 	messageTask := &MessageTask{}
-	// TODO: Student needs to uncomment below code to correctly process messages
+	// TODO: 学员需要取消注释下面的代码来正确处理消息
 	// messageTask.SignalChan = messageChan
 
 	root.AddTask(messageTask)
 	messageTask.WaitStarted()
 
-	// Create message producer
+	// 创建消息生产者
 	producer := &MessageProducer{
 		MessageChan: messageChan,
 	}
 	root.AddTask(producer)
 
-	// Wait for producer to complete
+	// 等待生产者完成
 	producer.WaitStopped()
 	time.Sleep(500 * time.Millisecond)
 
-	// Verification: Check if messages were processed
+	// 验证：检查是否处理了消息
 	processedCount := messageTask.GetProcessedCount()
 	if processedCount == 0 {
-		t.Fatal("Course not passed")
+		t.Fatal("课程未通过")
 	}
 
 	if processedCount != 3 {
-		t.Fatalf("Expected to process 3 messages, actually processed %d", processedCount)
+		t.Fatalf("期望处理3条消息，实际处理了%d条", processedCount)
 	}
 
-	t.Logf("Success! Processed %d messages", processedCount)
+	t.Logf("成功！处理了%d条消息", processedCount)
 
-	t.Log("Lesson 4 completed! Channel communication working normally")
+	t.Log("Lesson 4 完成！通道通信正常工作")
 }

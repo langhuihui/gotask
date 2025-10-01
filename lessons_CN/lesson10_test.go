@@ -7,7 +7,7 @@ import (
 	task "github.com/langhuihui/gotask"
 )
 
-// TestTaskFactory Test task factory (based on monibuca pattern)
+// TestTaskFactory 测试任务工厂（基于 monibuca 模式）
 type TestTaskFactory struct {
 	tasks map[string]func(*TestScenario, TestTaskConfig) task.ITask
 }
@@ -27,7 +27,7 @@ var testTaskFactory = TestTaskFactory{
 	tasks: make(map[string]func(*TestScenario, TestTaskConfig) task.ITask),
 }
 
-// TestTaskConfig Test task configuration (based on monibuca pattern)
+// TestTaskConfig 测试任务配置（基于 monibuca 模式）
 type TestTaskConfig struct {
 	Action     string        `json:"action"`
 	Delay      time.Duration `json:"delay"`
@@ -35,21 +35,21 @@ type TestTaskConfig struct {
 	StreamPath string        `json:"streamPath"`
 }
 
-// TestScenario Test scenario (based on monibuca's TestCase pattern)
+// TestScenario 测试场景（基于 monibuca 的 TestCase 模式）
 type TestScenario struct {
-	task.Job `json:"-"`
-	Name     string           `json:"name"`
-	Tasks    []TestTaskConfig `json:"tasks"`
+	task.Job         `json:"-"`
+	Name      string           `json:"name"`
+	Tasks     []TestTaskConfig `json:"tasks"`
 }
 
 func (ts *TestScenario) Start() error {
-	ts.Info("Test scenario started", "name", ts.Name)
+	ts.Info("测试场景启动", "name", ts.Name)
 
-	// Create and execute all tasks
+	// 创建并执行所有任务
 	for _, taskConfig := range ts.Tasks {
 		t, err := testTaskFactory.Create(taskConfig, ts)
 		if err != nil {
-			ts.Info("Task creation failed", "action", taskConfig.Action, "error", err)
+			ts.Info("创建任务失败", "action", taskConfig.Action, "error", err)
 			return err
 		}
 		ts.AddDependTask(t)
@@ -57,7 +57,7 @@ func (ts *TestScenario) Start() error {
 	return nil
 }
 
-// WebServerTask Web server task (based on monibuca's TestBaseTask pattern)
+// WebServerTask 网络服务器任务（基于 monibuca 的 TestBaseTask 模式）
 type WebServerTask struct {
 	task.Task
 	scenario *TestScenario
@@ -67,40 +67,40 @@ type WebServerTask struct {
 }
 
 func (w *WebServerTask) Start() error {
-	w.Info("Web server started", "serverName", w.ServerName, "port", w.Port)
+	w.Info("网络服务器启动", "serverName", w.ServerName, "port", w.Port)
 	return nil
 }
 
 func (w *WebServerTask) Go() error {
-	w.Info("Web server running", "serverName", w.ServerName)
+	w.Info("网络服务器运行中", "serverName", w.ServerName)
 
-	// Simulate server running
+	// 模拟服务器运行
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 
-	// Automatically stop after 5 runs
+	// 运行5次后自动停止
 	count := 0
 	for count < 5 {
 		select {
 		case <-ticker.C:
-			w.Info("Web server status check normal", "serverName", w.ServerName)
+			w.Info("网络服务器状态检查正常", "serverName", w.ServerName)
 			count++
 		case <-w.Done():
-			w.Info("Web server received stop signal", "serverName", w.ServerName)
+			w.Info("网络服务器收到停止信号", "serverName", w.ServerName)
 			return nil
 		}
 	}
 
-	w.Info("Web server run completed", "serverName", w.ServerName)
+	w.Info("网络服务器运行完成", "serverName", w.ServerName)
 	w.Stop(task.ErrTaskComplete)
 	return nil
 }
 
 func (w *WebServerTask) Dispose() {
-	w.Info("Web server cleaned up", "serverName", w.ServerName)
+	w.Info("网络服务器清理", "serverName", w.ServerName)
 }
 
-// DatabaseTask Database task (based on monibuca's TestBaseTask pattern)
+// DatabaseTask 数据库任务（基于 monibuca 的 TestBaseTask 模式）
 type DatabaseTask struct {
 	task.Task
 	scenario *TestScenario
@@ -110,47 +110,47 @@ type DatabaseTask struct {
 }
 
 func (d *DatabaseTask) Start() error {
-	d.Info("Database service started", "serviceName", d.ServiceName)
+	d.Info("数据库服务启动", "serviceName", d.ServiceName)
 
-	// Simulate database connection
+	// 模拟数据库连接
 	time.Sleep(500 * time.Millisecond)
 	d.Connected = true
-	d.Info("Database service connected successfully", "serviceName", d.ServiceName)
+	d.Info("数据库服务连接成功", "serviceName", d.ServiceName)
 
 	d.SetRetry(2, time.Second)
 	return nil
 }
 
 func (d *DatabaseTask) Go() error {
-	d.Info("Database service running", "serviceName", d.ServiceName)
+	d.Info("数据库服务运行中", "serviceName", d.ServiceName)
 
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	// Automatically stop after 10 runs
+	// 运行10次后自动停止
 	count := 0
 	for count < 10 {
 		select {
 		case <-ticker.C:
-			d.Info("Database service connection pool status normal", "serviceName", d.ServiceName)
+			d.Info("数据库服务连接池状态正常", "serviceName", d.ServiceName)
 			count++
 		case <-d.Done():
-			d.Info("Database service received stop signal", "serviceName", d.ServiceName)
+			d.Info("数据库服务收到停止信号", "serviceName", d.ServiceName)
 			return nil
 		}
 	}
 
-	d.Info("Database service run completed", "serviceName", d.ServiceName)
+	d.Info("数据库服务运行完成", "serviceName", d.ServiceName)
 	d.Stop(task.ErrTaskComplete)
 	return nil
 }
 
 func (d *DatabaseTask) Dispose() {
 	d.Connected = false
-	d.Info("Database service cleaned up", "serviceName", d.ServiceName)
+	d.Info("数据库服务清理", "serviceName", d.ServiceName)
 }
 
-// CacheTask Cache task (based on monibuca's TestBaseTask pattern)
+// CacheTask 缓存任务（基于 monibuca 的 TestBaseTask 模式）
 type CacheTask struct {
 	task.TickTask
 	scenario *TestScenario
@@ -164,31 +164,31 @@ func (c *CacheTask) GetTickInterval() time.Duration {
 }
 
 func (c *CacheTask) Start() error {
-	c.Info("Cache service started", "serviceName", c.ServiceName)
+	c.Info("缓存服务启动", "serviceName", c.ServiceName)
 	return c.TickTask.Start()
 }
 
 func (c *CacheTask) Tick(tick any) {
 	c.CacheHit++
-	c.Info("Cache service executed", "serviceName", c.ServiceName, "cacheHit", c.CacheHit)
+	c.Info("缓存服务执行", "serviceName", c.ServiceName, "cacheHit", c.CacheHit)
 
 	if c.CacheHit >= 10 {
-		c.Info("Cache service execution completed, automatically stopping", "serviceName", c.ServiceName)
+		c.Info("缓存服务执行完成，自动停止", "serviceName", c.ServiceName)
 		c.Stop(task.ErrTaskComplete)
 	}
 }
 
 func (c *CacheTask) Dispose() {
-	c.Info("Cache service cleaned up", "serviceName", c.ServiceName, "totalCacheHit", c.CacheHit)
+	c.Info("缓存服务清理", "serviceName", c.ServiceName, "totalCacheHit", c.CacheHit)
 }
 
-// Initialize task factory
+// 初始化任务工厂
 func init() {
 	testTaskFactory.Register("webserver", func(s *TestScenario, conf TestTaskConfig) task.ITask {
 		return &WebServerTask{
 			scenario:       s,
 			TestTaskConfig: conf,
-			ServerName:     "HTTP Server",
+			ServerName:     "HTTP服务器",
 			Port:           8080,
 		}
 	})
@@ -197,7 +197,7 @@ func init() {
 		return &DatabaseTask{
 			scenario:       s,
 			TestTaskConfig: conf,
-			ServiceName:    "MySQL Database",
+			ServiceName:    "MySQL数据库",
 		}
 	})
 
@@ -205,25 +205,25 @@ func init() {
 		return &CacheTask{
 			scenario:       s,
 			TestTaskConfig: conf,
-			ServiceName:    "Redis Cache",
+			ServiceName:    "Redis缓存",
 		}
 	})
 }
 
-// TestLesson10 Test comprehensive application case (based on monibuca test plugin pattern)
+// TestLesson10 测试综合应用案例（基于 monibuca 测试插件模式）
 func TestLesson10(t *testing.T) {
-	// Create test scenario
+	// 创建测试场景
 	scenario := &TestScenario{
-		Name: "Comprehensive Application Test Scenario",
+		Name:    "综合应用测试场景",
 		Tasks: []TestTaskConfig{
 			{Action: "webserver", StreamPath: "test/webserver"},
 			{Action: "database", StreamPath: "test/database"},
 			{Action: "cache", StreamPath: "test/cache"},
 		},
 	}
-	// Add test scenario to root task manager
+	// 将测试场景添加到根任务管理器
 	root.AddTask(scenario)
 	scenario.WaitStopped()
-	// Verify test results
-	t.Logf("Lesson 10 test passed: Comprehensive application case based on monibuca pattern")
+	// 验证测试结果
+	t.Logf("Lesson 10 测试通过：基于 monibuca 模式的综合应用案例")
 }

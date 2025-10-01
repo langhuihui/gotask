@@ -8,112 +8,112 @@ import (
 	task "github.com/langhuihui/gotask"
 )
 
-// 全局原子变量用于生成唯一键
+// Global atomic variable for generating unique keys
 var keyCounter uint32
 
-// SimpleService 简单服务，实现 ManagerItem 接口
+// SimpleService Simple service, implementing ManagerItem interface
 type SimpleService struct {
 	task.Task
 	Name string
 }
 
 func (s *SimpleService) GetKey() uint32 {
-	// 使用原子变量生成唯一键
+	// Use atomic variable to generate unique key
 	return atomic.AddUint32(&keyCounter, 1)
 }
 
 func (s *SimpleService) Start() error {
-	s.Info("服务启动", "name", s.Name)
+	s.Info("Service started", "name", s.Name)
 	return nil
 }
 
 func (s *SimpleService) Go() error {
-	s.Info("服务运行中", "name", s.Name)
+	s.Info("Service running", "name", s.Name)
 	time.Sleep(1 * time.Second)
 	return nil
 }
 
 func (s *SimpleService) Dispose() {
-	s.Info("服务清理", "name", s.Name)
+	s.Info("Service cleaned up", "name", s.Name)
 }
 
-// TestLesson06 测试RootManager作为WorkCollection的功能
+// TestLesson06 Test RootManager as WorkCollection functionality
 func TestLesson06(t *testing.T) {
-	t.Log("=== Lesson 6: RootManager作为WorkCollection的工作集合管理 ===")
-	t.Log("课程目标：学习如何使用RootManager作为WorkCollection管理服务集合")
-	t.Log("核心概念：WorkCollection提供集合操作功能，支持键值对管理、查找、遍历等")
+	t.Log("=== Lesson 6: RootManager as WorkCollection Work Set Management ===")
+	t.Log("Course Objective: Learn how to use RootManager as WorkCollection to manage service sets")
+	t.Log("Core Concepts: WorkCollection provides collection operations, supports key-value management, search, iteration, etc.")
 
-	// 创建1个简单服务
+	// Create 1 simple service
 	service := &SimpleService{Name: "test"}
 
-	// 检查初始状态
-	t.Logf("添加服务前，服务数量: %d", root.Length())
+	// Check initial state
+	t.Logf("Before adding service, service count: %d", root.Length())
 
-	// 添加服务到RootManager
+	// Add service to RootManager
 	root.AddTask(service)
-	t.Logf("添加服务后，服务数量: %d", root.Length())
+	t.Logf("After adding service, service count: %d", root.Length())
 
-	// 等待服务启动
+	// Wait for service to start
 	service.WaitStarted()
-	t.Logf("服务启动后，服务数量: %d", root.Length())
+	t.Logf("After service started, service count: %d", root.Length())
 
-	// 测试1: 验证服务数量
+	// Test 1: Verify service count
 	actualCount := root.Length()
-	t.Logf("实际服务数量: %d", actualCount)
+	t.Logf("Actual service count: %d", actualCount)
 	if actualCount < 1 {
-		t.Errorf("服务数量不足，期望至少: 1, 实际: %d", actualCount)
+		t.Errorf("Insufficient services, expected at least: 1, actual: %d", actualCount)
 		return
 	}
-	t.Log("✓ 服务数量验证通过")
+	t.Log("✓ Service count verification passed")
 
-	// 测试2: 验证Range方法 - 遍历所有服务
+	// Test 2: Verify Range method - iterate through all services
 	serviceNames := make([]string, 0)
 	root.Range(func(item task.ManagerItem[uint32]) bool {
 		if service, ok := item.(*SimpleService); ok {
-			// TODO: 取消注释来完成服务名称的验证
+			// TODO: Uncomment to complete service name verification
 			// serviceNames = append(serviceNames, service.Name)
 			_ = service
 		}
 		return true
 	})
 	if len(serviceNames) != 1 {
-		t.Errorf("课程未通过")
+		t.Errorf("Course not passed")
 		return
 	}
-	t.Logf("Range遍历找到的服务: %v", serviceNames)
-	t.Log("✓ Range方法验证通过")
+	t.Logf("Services found by Range iteration: %v", serviceNames)
+	t.Log("✓ Range method verification passed")
 
-	// 测试3: 验证Find方法 - 查找SimpleService类型的服务
+	// Test 3: Verify Find method - find services of SimpleService type
 	foundService, found := root.Find(func(item task.ManagerItem[uint32]) bool {
 		_, ok := item.(*SimpleService)
 		return ok
 	})
 	if !found {
-		t.Log("未找到SimpleService类型的服务，但这是正常的，因为可能只有OSSignal任务")
+		t.Log("SimpleService type service not found, but this is normal as there might only be OSSignal tasks")
 	} else {
-		t.Log("✓ Find方法验证通过")
+		t.Log("✓ Find method verification passed")
 
-		// 测试4: 验证Get方法
+		// Test 4: Verify Get method
 		serviceKey := foundService.GetKey()
 		_, ok := root.Get(serviceKey)
 		if !ok {
-			t.Error("无法获取服务")
+			t.Error("Unable to get service")
 			return
 		}
-		t.Log("✓ Get方法验证通过")
+		t.Log("✓ Get method verification passed")
 
-		// 测试5: 验证Has方法
+		// Test 5: Verify Has method
 		if !root.Has(serviceKey) {
-			t.Error("服务应该存在")
+			t.Error("Service should exist")
 			return
 		}
-		t.Log("✓ Has方法验证通过")
+		t.Log("✓ Has method verification passed")
 	}
 
-	t.Log("Lesson 6 测试通过：RootManager作为WorkCollection的工作集合管理")
+	t.Log("Lesson 6 test passed: RootManager as WorkCollection work set management")
 }
 
-// CustomService 自定义服务，用于演示WorkCollection泛型集合
+// CustomService Custom service, demonstrating WorkCollection generic collection
 type CustomService struct {
 	task.Task
 	ID   string
@@ -126,90 +126,90 @@ func (c *CustomService) GetKey() string {
 }
 
 func (c *CustomService) Start() error {
-	c.Info("自定义服务启动", "id", c.ID, "name", c.Name, "type", c.Type)
+	c.Info("Custom service started", "id", c.ID, "name", c.Name, "type", c.Type)
 	return nil
 }
 
 func (c *CustomService) Go() error {
-	c.Info("自定义服务运行中", "id", c.ID, "name", c.Name)
+	c.Info("Custom service running", "id", c.ID, "name", c.Name)
 	time.Sleep(500 * time.Millisecond)
 	return nil
 }
 
 func (c *CustomService) Dispose() {
-	c.Info("自定义服务清理", "id", c.ID, "name", c.Name)
+	c.Info("Custom service cleaned up", "id", c.ID, "name", c.Name)
 }
 
-// TestLesson06_2 测试WorkCollection泛型集合功能
+// TestLesson06_2 Test WorkCollection generic collection functionality
 func TestLesson06_2(t *testing.T) {
-	t.Log("=== Lesson 6.2: WorkCollection泛型集合功能测试 ===")
-	t.Log("课程目标：学习如何使用WorkCollection泛型集合管理不同类型的服务")
-	t.Log("核心概念：泛型类型安全、类型推断、集合操作方法")
+	t.Log("=== Lesson 6.2: WorkCollection Generic Collection Functionality Test ===")
+	t.Log("Course Objective: Learn how to use WorkCollection generic collection to manage different types of services")
+	t.Log("Core Concepts: Generic type safety, type inference, collection operation methods")
 
-	// 创建WorkCollection实例，使用string作为键类型，CustomService作为值类型
+	// Create WorkCollection instance, using string as key type, CustomService as value type
 	collection := &task.WorkCollection[string, *CustomService]{}
 
 	root.AddTask(collection)
-	
-	// 创建多个自定义服务
+
+	// Create multiple custom services
 	services := []*CustomService{
-		{ID: "service-1", Name: "用户服务", Type: "user"},
-		{ID: "service-2", Name: "订单服务", Type: "order"},
-		{ID: "service-3", Name: "支付服务", Type: "payment"},
-		{ID: "service-4", Name: "通知服务", Type: "notification"},
+		{ID: "service-1", Name: "User Service", Type: "user"},
+		{ID: "service-2", Name: "Order Service", Type: "order"},
+		{ID: "service-3", Name: "Payment Service", Type: "payment"},
+		{ID: "service-4", Name: "Notification Service", Type: "notification"},
 	}
 
-	// 测试1: 验证初始状态
-	t.Logf("初始集合长度: %d", collection.Length())
+	// Test 1: Verify initial state
+	t.Logf("Initial collection length: %d", collection.Length())
 	if collection.Length() != 0 {
-		t.Error("初始集合应该为空")
+		t.Error("Initial collection should be empty")
 		return
 	}
-	t.Log("✓ 初始状态验证通过")
+	t.Log("✓ Initial state verification passed")
 
-	// 测试2: 添加服务到集合
+	// Test 2: Add services to collection
 	for _, service := range services {
 		collection.AddTask(service)
-		t.Logf("添加服务: %s (%s)", service.Name, service.ID)
+		t.Logf("Added service: %s (%s)", service.Name, service.ID)
 	}
 
-	// 验证添加后的长度
+	// Verify length after adding
 	actualLength := collection.Length()
-	t.Logf("添加服务后集合长度: %d", actualLength)
+	t.Logf("Collection length after adding services: %d", actualLength)
 	if actualLength != len(services) {
-		t.Errorf("集合长度不匹配，期望: %d, 实际: %d", len(services), actualLength)
+		t.Errorf("Collection length mismatch, expected: %d, actual: %d", len(services), actualLength)
 		return
 	}
-	t.Log("✓ 服务添加验证通过")
+	t.Log("✓ Service addition verification passed")
 
-	// 测试3: 验证Has方法 - 检查服务是否存在
+	// Test 3: Verify Has method - check if service exists
 	for _, service := range services {
 		if !collection.Has(service.ID) {
-			t.Errorf("服务 %s 应该存在", service.ID)
+			t.Errorf("Service %s should exist", service.ID)
 			return
 		}
 	}
-	t.Log("✓ Has方法验证通过")
+	t.Log("✓ Has method verification passed")
 
-	// 测试4: 验证Get方法 - 根据键获取服务
+	// Test 4: Verify Get method - get service by key
 	for _, expectedService := range services {
 		actualService, ok := collection.Get(expectedService.ID)
 		if !ok {
-			t.Errorf("无法获取服务: %s", expectedService.ID)
+			t.Errorf("Unable to get service: %s", expectedService.ID)
 			return
 		}
 		if actualService.ID != expectedService.ID {
-			t.Errorf("服务ID不匹配，期望: %s, 实际: %s", expectedService.ID, actualService.ID)
+			t.Errorf("Service ID mismatch, expected: %s, actual: %s", expectedService.ID, actualService.ID)
 			return
 		}
 		if actualService.Name != expectedService.Name {
-			t.Errorf("服务名称不匹配，期望: %s, 实际: %s", expectedService.Name, actualService.Name)
+			t.Errorf("Service name mismatch, expected: %s, actual: %s", expectedService.Name, actualService.Name)
 			return
 		}
 	}
-	t.Log("✓ Get方法验证通过")
+	t.Log("✓ Get method verification passed")
 
-	// 测试5: 验证Find方法 - 查找特定类型的服务
+	// Test 5: Verify Find method - find specific type of services
 	userServices := make([]*CustomService, 0)
 	collection.Find(func(service *CustomService) bool {
 		if service.Type == "user" {
@@ -219,53 +219,53 @@ func TestLesson06_2(t *testing.T) {
 		return false
 	})
 	if len(userServices) != 1 {
-		t.Errorf("应该找到1个用户服务，实际找到: %d", len(userServices))
+		t.Errorf("Should find 1 user service, actually found: %d", len(userServices))
 		return
 	}
 	if userServices[0].ID != "service-1" {
-		t.Errorf("用户服务ID不匹配，期望: service-1, 实际: %s", userServices[0].ID)
+		t.Errorf("User service ID mismatch, expected: service-1, actual: %s", userServices[0].ID)
 		return
 	}
-	t.Log("✓ Find方法验证通过")
+	t.Log("✓ Find method verification passed")
 
-	// 测试6: 验证Range方法 - 遍历所有服务
+	// Test 6: Verify Range method - iterate through all services
 	collectedServices := make([]*CustomService, 0)
 	collection.Range(func(service *CustomService) bool {
 		collectedServices = append(collectedServices, service)
 		return true
 	})
 	if len(collectedServices) != len(services) {
-		t.Errorf("Range遍历结果不匹配，期望: %d, 实际: %d", len(services), len(collectedServices))
+		t.Errorf("Range iteration result mismatch, expected: %d, actual: %d", len(services), len(collectedServices))
 		return
 	}
-	t.Log("✓ Range方法验证通过")
+	t.Log("✓ Range method verification passed")
 
-	// 测试7: 验证ToList方法 - 转换为列表
+	// Test 7: Verify ToList method - convert to list
 	serviceList := collection.ToList()
 	if len(serviceList) != len(services) {
-		t.Errorf("ToList结果不匹配，期望: %d, 实际: %d", len(services), len(serviceList))
+		t.Errorf("ToList result mismatch, expected: %d, actual: %d", len(services), len(serviceList))
 		return
 	}
-	t.Log("✓ ToList方法验证通过")
+	t.Log("✓ ToList method verification passed")
 
-	// 测试8: 验证类型安全性 - 尝试获取不存在的服务
+	// Test 8: Verify type safety - try to get non-existent service
 	_, ok := collection.Get("non-existent-service")
 	if ok {
-		t.Error("不应该找到不存在的服务")
+		t.Error("Should not find non-existent service")
 		return
 	}
-	t.Log("✓ 类型安全性验证通过")
+	t.Log("✓ Type safety verification passed")
 
-	// 测试9: 验证泛型类型推断
-	// 这里演示泛型如何确保类型安全
+	// Test 9: Verify generic type inference
+	// Demonstrate how generics ensure type safety
 	var typedCollection *task.WorkCollection[string, *CustomService] = collection
 	if typedCollection.Length() != collection.Length() {
-		t.Error("泛型类型推断失败")
+		t.Error("Generic type inference failed")
 		return
 	}
-	t.Log("✓ 泛型类型推断验证通过")
+	t.Log("✓ Generic type inference verification passed")
 
-	// 测试10: 验证Find方法的条件查找
+	// Test 10: Verify Find method's conditional search
 	orderServices := make([]*CustomService, 0)
 	collection.Find(func(service *CustomService) bool {
 		if service.Type == "order" {
@@ -275,10 +275,10 @@ func TestLesson06_2(t *testing.T) {
 		return false
 	})
 	if len(orderServices) != 1 {
-		t.Errorf("应该找到1个订单服务，实际找到: %d", len(orderServices))
+		t.Errorf("Should find 1 order service, actually found: %d", len(orderServices))
 		return
 	}
-	t.Log("✓ 条件查找验证通过")
+	t.Log("✓ Conditional search verification passed")
 
-	t.Log("Lesson 6.2 测试通过：WorkCollection泛型集合功能完整验证")
+	t.Log("Lesson 6.2 test passed: WorkCollection generic collection functionality fully verified")
 }

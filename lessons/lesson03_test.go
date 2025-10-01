@@ -7,66 +7,66 @@ import (
 	task "github.com/langhuihui/gotask"
 )
 
-// WorkerTask03 工作任务（会自动完成）
+// WorkerTask03 Work task (automatically completes)
 type WorkerTask03 struct {
 	task.Task
 	WorkerID int
 }
 
 func (t *WorkerTask03) Start() error {
-	t.Info("工作线程启动", "workerID", t.WorkerID)
+	t.Info("Worker thread started", "workerID", t.WorkerID)
 	return nil
 }
 
 func (t *WorkerTask03) Run() error {
-	t.Info("工作线程运行", "workerID", t.WorkerID)
+	t.Info("Worker thread running", "workerID", t.WorkerID)
 	return nil
 }
 
-// ServerWork 服务器工作任务
+// ServerWork Server work task
 type ServerWork struct {
 	task.Work
 	ServerName string
 }
 
-// TestLesson03 测试Work长期运行任务
+// TestLesson03 Test Work long-running tasks
 func TestLesson03(t *testing.T) {
-	t.Log("=== Lesson 3: Work长期运行任务 ===")
-	t.Log("课程目标：学习Work和Job的区别，理解长期运行任务容器的特性")
-	t.Log("核心概念：Work的keepalive返回true，即使所有子任务完成，Work也不会自动停止")
-	t.Log("对比Job：Job在所有子任务完成后会自动停止，而Work会持续运行")
-	t.Log("学习内容：Work容器管理、keepalive机制、手动停止Work任务")
+	t.Log("=== Lesson 3: Work Long-running Tasks ===")
+	t.Log("Course Objective: Learn difference between Work and Job, understand long-running task container characteristics")
+	t.Log("Core Concept: Work's keepalive returns true, even if all subtasks complete, Work won't automatically stop")
+	t.Log("Comparison with Job: Job automatically stops when all subtasks complete, while Work continues running")
+	t.Log("Learning Content: Work container management, keepalive mechanism, manual Work task stopping")
 
-	// 创建服务器工作任务
-	server := &ServerWork{ServerName: "Web服务器"}
+	// Create server work task
+	server := &ServerWork{ServerName: "Web Server"}
 
-	// 将服务器任务添加到根管理器中
+	// Add server task to root manager
 	root.AddTask(server)
 
-	// 创建多个工作线程（与Lesson02_1相同，都有Run方法会自动完成）
+	// Create multiple worker threads (same as Lesson02_1, all have Run method and automatically complete)
 	workers := make([]*WorkerTask03, 3)
 	for i := 1; i <= 3; i++ {
 		workers[i-1] = &WorkerTask03{WorkerID: i}
 		server.AddTask(workers[i-1])
 	}
 
-	// 等待所有子任务完成
+	// Wait for all subtasks to complete
 	for _, worker := range workers {
 		worker.WaitStopped()
 	}
-	t.Log("所有子任务已完成")
+	t.Log("All subtasks completed")
 
-	// 等待一段时间，观察Work的状态
+	// Wait for a while, observe Work's state
 	time.Sleep(1 * time.Second)
 
-	// 需要手动停止Work（这是Work和Job的关键区别）
-	// TODO: 取消注释来完成手动停止
+	// Need to manually stop Work (this is key difference between Work and Job)
+	// TODO: Uncomment to complete manual stop
 	// server.Stop(task.ErrStopByUser)
 	// server.WaitStopped()
 
 	if server.GetState() == task.TASK_STATE_DISPOSED {
-		t.Log("✓ Lesson 3 测试通过：Work长期运行任务")
+		t.Log("✓ Lesson 3 test passed: Work Long-running Tasks")
 	} else {
-		t.Errorf("课程未通过")
+		t.Errorf("Course not passed")
 	}
 }

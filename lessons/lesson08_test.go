@@ -8,7 +8,7 @@ import (
 	task "github.com/langhuihui/gotask"
 )
 
-// UnstableTask 不稳定任务
+// UnstableTask Unstable task
 type UnstableTask struct {
 	task.Task
 	TaskName  string
@@ -16,60 +16,60 @@ type UnstableTask struct {
 }
 
 func (u *UnstableTask) Start() error {
-	u.Info("不稳定任务启动", "taskName", u.TaskName)
+	u.Info("Unstable task started", "taskName", u.TaskName)
 	return nil
 }
 
 func (u *UnstableTask) Run() error {
-	u.Info("不稳定任务运行中", "taskName", u.TaskName)
+	u.Info("Unstable task running", "taskName", u.TaskName)
 
-	// 第一次必定失败，第二次必定成功
+	// First attempt must fail, second attempt must succeed
 	if !u.hasFailed {
 		u.hasFailed = true
-		u.Info("不稳定任务尝试失败", "taskName", u.TaskName)
-		return fmt.Errorf("任务执行失败，第一次尝试")
+		u.Info("Unstable task attempt failed", "taskName", u.TaskName)
+		return fmt.Errorf("Task execution failed, first attempt")
 	}
 
-	u.Info("不稳定任务尝试成功", "taskName", u.TaskName)
-	time.Sleep(5*time.Second)
+	u.Info("Unstable task attempt succeeded", "taskName", u.TaskName)
+	time.Sleep(5 * time.Second)
 	return nil
 }
 
 func (u *UnstableTask) Dispose() {
-	u.Info("不稳定任务清理", "taskName", u.TaskName)
+	u.Info("Unstable task cleaned up", "taskName", u.TaskName)
 }
 
-// RetryManager 重试管理任务
+// RetryManager Retry management task
 type RetryManager struct {
 	task.Job
 	ManagerName string
 }
 
-// TestLesson08 测试重试机制
+// TestLesson08 Test retry mechanism
 func TestLesson08(t *testing.T) {
-	t.Log("=== Lesson 8: 重试机制 ===")
-	t.Log("课程目标：学习如何使用重试机制处理失败任务，了解错误恢复策略")
-	t.Log("核心概念：SetRetry方法设置重试策略，支持有限重试和无限重试")
-	t.Log("学习内容：重试间隔设置、重试状态监控、错误恢复策略")
+	t.Log("=== Lesson 8: Retry Mechanism ===")
+	t.Log("Course Objective: Learn how to use retry mechanism to handle failed tasks, understand error recovery strategies")
+	t.Log("Core Concepts: SetRetry method sets retry strategy, supports limited retries and unlimited retries")
+	t.Log("Learning Content: Retry interval settings, retry status monitoring, error recovery strategies")
 
-	// 创建重试管理任务
-	retryManager := &RetryManager{ManagerName: "重试管理器"}
+	// Create retry management task
+	retryManager := &RetryManager{ManagerName: "Retry Manager"}
 
-	// 将重试管理任务添加到根管理器中
+	// Add retry management task to root manager
 	root.AddTask(retryManager)
-	
-	// 创建不稳定任务
-	unstableTask := &UnstableTask{TaskName: "不稳定任务"}
 
-	// TODO: 取消注释下面的代码来通过课程
+	// Create unstable task
+	unstableTask := &UnstableTask{TaskName: "Unstable Task"}
+
+	// TODO: Uncomment the code below to pass the course
 	// unstableTask.SetRetry(2, 1*time.Second)
 
 	retryManager.AddTask(unstableTask)
 
 	time.Sleep(3 * time.Second)
 	if unstableTask.GetState() != task.TASK_STATE_RUNNING {
-		t.Fatal("课程未通过")
+		t.Fatal("Course not passed")
 		return
 	}
-	t.Log("Lesson 8 测试通过：重试机制")
+	t.Log("Lesson 8 test passed: Retry mechanism")
 }

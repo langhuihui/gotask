@@ -1,109 +1,109 @@
-# GoTask 教学课程
+# GoTask Learning Course
 
-欢迎来到GoTask框架的教学课程！这个目录包含了10个渐进式的课程，从基础到高级，帮助你全面掌握GoTask框架的使用。
+Welcome to the GoTask framework learning course! This directory contains 10 progressive lessons, from basic to advanced, to help you master the GoTask framework comprehensively.
 
-## 课程结构
+## Course Structure
 
-### 基础课程 (Lesson 1-3)
-- **Lesson 1**: 基础Task使用 - 学习最基本的任务定义和执行
-- **Lesson 2**: Job容器管理 - 学习如何管理多个子任务
-- **Lesson 3**: Work长期运行任务 - 学习异步任务的执行
+### Basic Courses (Lesson 1-3)
+- **Lesson 1**: Basic Task Usage - Learn the most fundamental task definition and execution
+- **Lesson 2**: Job Container Management - Learn how to manage multiple subtasks
+- **Lesson 3**: Work Long-running Tasks - Learn asynchronous task execution
 
-### 中级课程 (Lesson 4-6)
-- **Lesson 4**: ChannelTask通道任务 - 学习任务间通信
-- **Lesson 5**: TickTask定时任务 - 学习定时器任务
-- **Lesson 6**: RootManager根任务管理 - 学习应用程序级管理
+### Intermediate Courses (Lesson 4-6)
+- **Lesson 4**: ChannelTask Communication - Learn inter-task communication
+- **Lesson 5**: TickTask Scheduled Tasks - Learn timer-based tasks
+- **Lesson 6**: RootManager Root Task Management - Learn application-level management
 
-### 高级课程 (Lesson 7-9)
-- **Lesson 7**: 资源管理与清理 - 学习资源生命周期管理
-- **Lesson 8**: 重试机制 - 学习错误恢复策略
-- **Lesson 9**: 事件监听与回调 - 学习任务间协作
+### Advanced Courses (Lesson 7-9)
+- **Lesson 7**: Resource Management and Cleanup - Learn resource lifecycle management
+- **Lesson 8**: Retry Mechanism - Learn error recovery strategies
+- **Lesson 9**: Event Listening and Callbacks - Learn task collaboration
 
-### 综合应用 (Lesson 10)
-- **Lesson 10**: 综合应用案例 - 完整应用程序示例
+### Comprehensive Application (Lesson 10)
+- **Lesson 10**: Comprehensive Application Example - Complete application demonstration
 
-## 如何使用这些课程
+## How to Use These Courses
 
-### 1. 按顺序学习
-建议按照课程编号顺序学习，每个课程都建立在前一个课程的基础上。
+### 1. Learn in Order
+It's recommended to learn in numerical order, as each lesson builds upon the previous one.
 
-### 2. 动手实践
-每个课程都包含TODO注释，你需要：
-1. 阅读课程说明
-2. 按照TODO注释的提示取消注释
-3. 运行程序验证结果
-4. 理解每个概念的作用
+### 2. Hands-on Practice
+Each lesson contains TODO comments. You need to:
+1. Read the lesson instructions
+2. Uncomment according to TODO comment hints
+3. Run the program to verify results
+4. Understand the purpose of each concept
 
-### 3. 运行课程
+### 3. Running Lessons
 ```bash
-# 进入课程目录
+# Enter the lesson directory
 cd lessons/lesson01
 
-# 运行课程
+# Run the lesson
 go run main.go
 ```
 
-### 4. 验证学习效果
-每个课程都有预期的输出结果，确保你的程序输出与预期一致。
+### 4. Verify Learning Outcomes
+Each lesson has expected output results. Ensure your program output matches expectations.
 
-## 课程特色
+## Course Features
 
-### 渐进式设计
-- 从简单到复杂，循序渐进
-- 每个概念都有实际应用场景
-- 避免一次性学习过多概念
+### Progressive Design
+- From simple to complex, step by step
+- Each concept has practical application scenarios
+- Avoid learning too many concepts at once
 
-### 实践导向
-- 每个课程都是可运行的完整程序
-- 通过TODO注释引导学习
-- 提供详细的预期输出
+### Practice-Oriented
+- Each lesson is a runnable complete program
+- Guided learning through TODO comments
+- Provides detailed expected output
 
-### 全面覆盖
-- 涵盖GoTask框架的所有核心功能
-- 包含最佳实践和常见模式
-- 提供完整的应用程序示例
+### Comprehensive Coverage
+- Covers all core features of GoTask framework
+- Includes best practices and common patterns
+- Provides complete application examples
 
-## 学习建议
+## Learning Suggestions
 
-### 1. 理解概念
-不要只是取消注释，要理解每个方法的作用和适用场景。
+### 1. Understand Concepts
+Don't just uncomment - understand the purpose and applicable scenarios of each method.
 
-### 2. 实验修改
-尝试修改参数，观察不同的行为，加深理解。
+### 2. Experiment with Modifications
+Try modifying parameters, observe different behaviors, and deepen understanding.
 
-### 3. 查看源码
-结合GoTask框架的源码，理解内部实现机制。
+### 3. Review Source Code
+Combine with GoTask framework source code to understand internal implementation mechanisms.
 
-### 4. 构建项目
-学完所有课程后，尝试构建自己的项目。
+### 4. Build Projects
+After completing all lessons, try building your own projects.
 
-## 故障排除
+## Troubleshooting
 
-### 常见问题
+### Common Issues
 
-1. **编译错误**
-   - 确保Go版本 >= 1.23
-   - 检查go.mod文件中的依赖
+1. **Compilation Errors**
+   - Ensure Go version >= 1.23
+   - Check dependencies in go.mod file
 
-2. **运行时错误**
-   - 确保按照TODO注释正确取消注释
-   - 检查任务的生命周期管理
+2. **Runtime Errors**
+   - Ensure correct uncommenting according to TODO comments
+   - Check task lifecycle management
 
-3. **输出不符合预期**
-   - 检查是否所有TODO都已取消注释
-   - 确认任务启动和停止的顺序
+3. **Unexpected Output**
+   - Check if all TODOs have been uncommented
+   - Confirm task start and stop order
 
-### 获取帮助
-- 查看GoTask项目文档
-- 阅读源码注释
-- 参考测试用例
+### Getting Help
+- Review GoTask project documentation
+- Read source code comments
+- Refer to test cases
 
-## 下一步
+## Next Steps
 
-完成所有课程后，你可以：
-1. 阅读GoTask框架的完整文档
-2. 查看dashboard示例项目
-3. 构建自己的GoTask应用程序
-4. 参与GoTask社区讨论
+After completing all lessons, you can:
+1. Read complete GoTask framework documentation
+2. Check dashboard example project
+3. Build your own GoTask applications
+4. Participate in GoTask community discussions
 
-祝你学习愉快！🚀
+Happy learning! 🚀
