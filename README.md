@@ -1,4 +1,7 @@
 # GoTask
+<div align="center">
+  <img src="logo.png" alt="GoTask Logo" width="200" height="200">
+</div>
 
 [中文文档](README_CN.md) | English
 

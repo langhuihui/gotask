@@ -1,5 +1,9 @@
 # GoTask
 
+<div align="center">
+  <img src="logo.png" alt="GoTask Logo" width="200" height="200">
+</div>
+
 [English](README.md) | 中文文档
 
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-blue.svg)](https://golang.org/)
