@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/langhuihui/gotask/util"
 )
@@ -15,6 +16,7 @@ import (
 var idG sync.Mutex
 var taskIDCounter uint32
 var sourceFilePathPrefix string
+
 type ExistTaskError struct {
 	Task ITask
 }
@@ -203,11 +205,22 @@ func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 }
 
 func (mt *Job) Call(callback func()) {
+	_, file, line, _ := runtime.Caller(1)
+	caller := fmt.Sprintf("%s:%d", strings.TrimPrefix(file, sourceFilePathPrefix), line)
 	if mt.Size.Load() <= 0 {
+		mt.Debug("call immediately", "caller", caller)
+		startTime := time.Now()
 		callback()
+		mt.Debug("call immediately done", "caller", caller, "elapsed", time.Since(startTime))
 		return
 	}
 	ctx, cancel := context.WithCancel(mt)
-	_ = mt.eventLoop.add(mt, func() { callback(); cancel() })
+	_ = mt.eventLoop.add(mt, func() {
+		startTime := time.Now()
+		mt.Debug("call", "caller", caller)
+		callback()
+		mt.Debug("call done", "caller", caller, "elapsed", time.Since(startTime))
+		cancel()
+	})
 	<-ctx.Done()
 }
