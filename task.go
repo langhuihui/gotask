@@ -438,7 +438,6 @@ func (task *Task) dispose() {
 	if v, ok := task.handler.(TaskDisposal); ok {
 		v.Dispose()
 	}
-	task.shutdown.Fulfill(reason)
 	task.SetDescription("disposeProcess", "resources")
 	task.stopOnce.Do(task.stop)
 	for _, resource := range task.resources {
@@ -460,6 +459,7 @@ func (task *Task) dispose() {
 	}
 	task.SetDescription("disposeProcess", "done")
 	task.state = TASK_STATE_DISPOSED
+	task.shutdown.Fulfill(reason)
 }
 
 func (task *Task) ResetRetryCount() {

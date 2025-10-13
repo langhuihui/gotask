@@ -4,20 +4,19 @@ import (
 	"context"
 	"errors"
 	"io"
-	"log/slog"
-	"os"
 	"sync/atomic"
 	"testing"
 	"time"
 )
 
-var root Work
+// Use RootManager as root task manager
+type TaskManager = RootManager[uint32, ManagerItem[uint32]]
+
+// Create root task manager
+var root TaskManager
 
 func init() {
-	root.Context, root.CancelCauseFunc = context.WithCancelCause(context.Background())
-	root.handler = &root
-	root.Logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
-	slog.SetLogLoggerLevel(slog.LevelDebug)
+	root.Init()
 }
 
 func Test_AddTask_AddsTaskSuccessfully(t *testing.T) {

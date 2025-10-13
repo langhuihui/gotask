@@ -70,7 +70,9 @@ func (mt *Job) waitChildrenDispose(stopReason error) {
 	mt.children.Range(func(key, value any) bool {
 		child := value.(ITask)
 		child.Stop(stopReason)
+		mt.SetDescription("waitChildDispose", child.GetTaskID())
 		child.WaitStopped()
+		mt.RemoveDescription("waitChildDispose")
 		return true
 	})
 }
