@@ -49,6 +49,7 @@
   - [How to Use the Lessons](#how-to-use-the-lessons)
   - [Course Features](#course-features)
   - [Learning Recommendations](#learning-recommendations)
+  - [Course List](#course-list)
 - [Contribution](#contribution)
   - [Contribution Methods](#contribution-methods)
 - [License](#license)
@@ -559,6 +560,10 @@ This script automatically starts the backend service and frontend development se
 ## Tutorial Lessons
 
 The GoTask project provides a complete tutorial lesson system located in the `lessons/` directory. This system contains 10 progressive lessons, from basic to advanced, helping developers fully master the GoTask framework.
+
+### Course List
+
+- [A Deep Dive into GoTask: The Art of the EventLoop and Dynamic Select](./lessons/eventloop-and-dynamic-select.md)
 
 ### Course Structure
 
