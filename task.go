@@ -112,9 +112,10 @@ type (
 		Go() error
 	}
 	RetryConfig struct {
-		MaxRetry      int
-		RetryCount    int
-		RetryInterval time.Duration
+		MaxRetry         int
+		RetryCount       int
+		RetryInterval    time.Duration // Base interval for exponential backoff
+		MaxRetryInterval time.Duration // Maximum interval (0 means no limit)
 	}
 	Description    = map[string]any
 	TaskContextKey string
@@ -166,6 +167,12 @@ func (task *Task) GetParent() ITask {
 func (task *Task) SetRetry(maxRetry int, retryInterval time.Duration) {
 	task.retry.MaxRetry = maxRetry
 	task.retry.RetryInterval = retryInterval
+}
+
+// SetMaxRetryInterval sets the maximum retry interval for exponential backoff
+// If set to 0, there is no maximum limit (default behavior)
+func (task *Task) SetMaxRetryInterval(maxRetryInterval time.Duration) {
+	task.retry.MaxRetryInterval = maxRetryInterval
 }
 
 func (task *Task) GetTaskID() uint32 {
@@ -311,8 +318,28 @@ func (task *Task) checkRetry(err error) bool {
 		} else {
 			task.Warn(fmt.Sprintf("retry %d/%d", task.retry.RetryCount, task.retry.MaxRetry), "taskId", task.ID)
 		}
-		if delta := time.Since(task.StartTime); delta < task.retry.RetryInterval {
-			time.Sleep(task.retry.RetryInterval - delta)
+
+		// Calculate exponential backoff delay: baseInterval * 2^(retryCount-1)
+		retryDelay := task.retry.RetryInterval
+		if task.retry.RetryCount > 1 {
+			// Calculate 2^(retryCount-1) using bit shift for better performance
+			exponent := task.retry.RetryCount - 1
+			if exponent < 30 { // Avoid overflow for very large retry counts
+				retryDelay = task.retry.RetryInterval * time.Duration(1<<exponent)
+			} else {
+				// For very large retry counts, use maximum allowed duration
+				retryDelay = task.retry.RetryInterval * time.Duration(1<<30)
+			}
+
+			// Apply maximum delay limit if set
+			if task.retry.MaxRetryInterval > 0 && retryDelay > task.retry.MaxRetryInterval {
+				retryDelay = task.retry.MaxRetryInterval
+			}
+		}
+
+		task.SetDescription("retryDelay", retryDelay.String())
+		if delta := time.Since(task.StartTime); delta < retryDelay {
+			time.Sleep(retryDelay - delta)
 		}
 		return true
 	} else {
