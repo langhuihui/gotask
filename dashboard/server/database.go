@@ -77,12 +77,6 @@ func (d *Database) GetSession(sessionID string) (*SessionInfo, error) {
 
 // SaveTaskHistory 保存任务历史记录
 func (d *Database) SaveTaskHistory(history TaskHistory) error {
-	// 将 descriptions 转换为 JSON
-	descriptionsJSON, err := json.Marshal(history.Descriptions)
-	if err != nil {
-		return fmt.Errorf("failed to marshal descriptions: %w", err)
-	}
-
 	// 创建 GORM 模型
 	taskHistory := &TaskHistory{
 		TaskID:       history.TaskID,
@@ -94,7 +88,7 @@ func (d *Database) SaveTaskHistory(history TaskHistory) error {
 		State:        history.State,
 		StopReason:   history.StopReason,
 		RetryCount:   history.RetryCount,
-		Descriptions: string(descriptionsJSON),
+		Descriptions: history.Descriptions,
 		MaxRetry:     history.MaxRetry,
 		ParentID:     history.ParentID,
 		Level:        history.Level,
