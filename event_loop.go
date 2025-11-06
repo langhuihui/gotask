@@ -106,16 +106,11 @@ func (e *EventLoop) run(mt *Job) {
 				if len(ch) > 0 { // if add before running set to false
 					mt.Warn("job addSub channel after change running to false", "jobId", mt.GetTaskID())
 					e.active(mt)
-				} 
+				}
 				return
 			}
 		}
 		if chosen, rev, ok := reflect.Select(e.cases); chosen == 0 {
-			if !ok {
-				mt.Debug("job addSub channel closed, exiting", "jobId", mt.GetTaskID())
-				mt.Stop(ErrAutoStop)
-				return
-			}
 			switch v := rev.Interface().(type) {
 			case func():
 				v()

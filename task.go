@@ -255,7 +255,7 @@ func (task *Task) Stop(err error) {
 	_, file, line, _ := runtime.Caller(1)
 	task.stopOnce.Do(func() {
 		if task.CancelCauseFunc != nil {
-			msg := "task stop"
+			msg := "task cancel context"
 			if task.startup != nil && task.startup.IsRejected() {
 				msg = "task start failed"
 			}
@@ -267,6 +267,8 @@ func (task *Task) Stop(err error) {
 }
 
 func (task *Task) stop() {
+	task.WaitStarted() // wait for task to set closeOnStop
+	task.Debug("task stop", "taskId", task.ID, "ownerType", task.GetOwnerType(), "closeOnStop", len(task.closeOnStop))
 	for _, resource := range task.closeOnStop {
 		switch v := resource.(type) {
 		case func():
