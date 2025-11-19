@@ -286,7 +286,7 @@ gotask/
 │   └── .augment-guidelines # Augment AI rules
 ├── util/
 │   └── promise.go          # Promise implementation
-├── lessons/                # Tutorial lessons
+├── lessons/                # Tutorial lessons (Test files)
 └── dashboard/
     ├── server/             # Backend management service
     └── web/                # React frontend management interface
@@ -305,6 +305,571 @@ gotask/
 7. **Fallback Mechanism** - Errors can be intercepted and handled, providing comprehensive exception handling
 8. **Optional Retry Mechanism** - Supports automatic retry after task failure, with configurable retry strategies
 9. **Storable History Records** - Task execution history can be recorded and queried
+
+### Nine Core Features Detailed
+
+#### 1. Called in Parent Task's Goroutine
+**Pain Point**: In complex asynchronous systems, concurrent execution of child tasks often leads to resource contention and state inconsistency. Traditional goroutine management makes it hard to control execution order, easily leading to data race conditions.
+
+**Implementation Principle**: GoTask adopts a single-goroutine event loop model. The `Start()` and `Dispose()` methods of all child tasks are executed sequentially in the parent task's dedicated goroutine. Through the EventLoop mechanism, it ensures that child tasks under the same parent task never execute concurrently.
+
+**Core Concepts**:
+- **Macro Task (Parent Task)**: Can contain multiple child tasks; is a task itself.
+- **Child Task Goroutine**: Each macro task starts a goroutine to execute `Start`, `Run`, and `Dispose` methods of its child tasks.
+- **Lazy Loading**: The goroutine is not created initially; it's created only when there are child tasks.
+
+**Code Example**:
+```go
+// Connection Manager (Parent Task)
+type Connection struct {
+    task.Job  // Job can contain child tasks; ends when all children end
+    Plugin     *Plugin
+    StreamPath string
+    RemoteURL  string
+    HTTPClient *http.Client
+}
+
+// Heartbeat Task (Child Task)
+type HeartbeatTask struct {
+    task.TickTask
+    connection *Connection
+    interval   time.Duration
+}
+
+func (h *HeartbeatTask) GetTickInterval() time.Duration {
+    return h.interval
+}
+
+func (h *HeartbeatTask) Start() error {
+    // Starts in parent task's goroutine
+    h.Info("Heartbeat task started", "url", h.connection.RemoteURL)
+    return nil
+}
+
+func (h *HeartbeatTask) Dispose() {
+    // Cleans up in parent task's goroutine
+    h.Info("Heartbeat task cleanup", "url", h.connection.RemoteURL)
+}
+
+// Usage
+conn := &Connection{RemoteURL: "rtmp://example.com/live/stream"}
+heartbeat := &HeartbeatTask{connection: conn, interval: 30*time.Second}
+conn.AddTask(heartbeat)
+// Heartbeat task executes sequentially in connection manager's goroutine
+```
+
+**Value**: 
+- Completely avoids concurrent access to shared resources.
+- Simplifies debugging and maintenance of complex asynchronous logic.
+- Ensures predictability and consistency of task execution.
+- Reduces lock usage, improving system performance.
+
+#### 2. Graceful Shutdown
+**Pain Point**: When the system shuts down, running tasks might be forcibly interrupted, causing resource leaks and data inconsistency. Especially in scenarios involving network connections or file operations, abrupt process termination can have serious consequences.
+
+**Implementation Principle**: Implements graceful shutdown via `context.Context`. When a parent task receives a stop signal, it sequentially calls `Stop()` on all child tasks and waits for them to complete resource cleanup before exiting. The EventLoop detects the context cancellation signal and ensures all tasks execute their `Dispose()` method correctly.
+
+**Resource Disposal Optimization**:
+- **Optimized Disposal Order**: The framework automatically manages task disposal order, ensuring correct dependencies and avoiding resource leaks.
+- **Automatic Cascading Disposal**: When a parent task is disposed, it automatically triggers disposal of all child tasks, eliminating the need for manual dependency management.
+- **Associated Disposal**: Supports associated disposal between tasks; when a key task stops, related tasks stop automatically.
+- **Race-condition Safety**: Ensures thread safety during disposal via the single-goroutine mechanism.
+
+**Waiting Mechanism**: Uses `WaitStarted()` and `WaitStopped()` to wait for task start and completion. This blocks the current goroutine, ensuring state synchronization.
+
+**Code Example**:
+```go
+// SRT Receiver Task
+type Receiver struct {
+    task.Task
+    mpegts.MpegTsStream
+    srt.Conn
+}
+
+func (r *Receiver) Start() error {
+    // Setup SRT connection and memory allocator
+    r.Allocator = util.NewScalableMemoryAllocator(1 << util.MinPowerOf2)
+    r.Using(r.Allocator, r.Publisher)
+    // Set close hook
+    r.OnStop(r.Conn.Close)
+    return nil
+}
+
+func (r *Receiver) Dispose() {
+    // Gracefully close SRT connection
+    if r.Conn != nil {
+        r.Conn.Close()
+    }
+    // Framework handles cascading disposal of child tasks
+}
+
+// Server Graceful Shutdown
+func (s *Server) OnStop() {
+    // Set stop hook, exit after 3 seconds
+    s.Servers.OnStop(func() {
+        time.AfterFunc(3*time.Second, exit)
+    })
+    // Set cleanup hook
+    s.Servers.OnDispose(exit)
+}
+
+// Wait for task completion
+func waitForReceiver() {
+    receiver := &Receiver{}
+    receiver.Start()
+    
+    // Wait for start
+    receiver.WaitStarted()
+    
+    // Wait for stop
+    receiver.WaitStopped()
+}
+```
+
+**Value**:
+- Ensures all resources are correctly released upon system shutdown.
+- Prevents data loss and state inconsistency.
+- Supports hot restarts and rolling updates.
+- Improves system reliability and stability.
+- **Solves Resource Disposal Challenges**: Automatically manages disposal order.
+- **Simplifies Resource Management**: No need to manually manage complex dependencies.
+- **Prevents Resource Leaks**: Cascading disposal ensures complete cleanup.
+
+#### 3. Unique ID
+**Pain Point**: In microservice architectures, task tracking and issue localization are difficult. It's hard to pinpoint specific task instances when problems occur, especially in distributed environments lacking a unified identification system.
+
+**Implementation Principle**: Each task is assigned a globally unique ID upon creation, which remains constant throughout its lifecycle. This ID allows tracking of state changes (creation, execution, stopping).
+
+**Code Example**:
+```go
+// Publisher Task
+type Publisher struct {
+    task.Task
+    StreamPath string
+    RemoteAddr string
+    Type       string
+}
+
+func (p *Publisher) Start() error {
+    // Each publisher has a unique ID
+    p.Info("Publisher started", "streamPath", p.StreamPath, "taskId", p.GetID())
+    return nil
+}
+
+// Use stream path as key
+func (p *Publisher) GetKey() string {
+    return p.StreamPath
+}
+
+// Task ID used for log tracing
+func (p *Publisher) Run() error {
+    p.Info("Publisher running", "streamPath", p.StreamPath, "taskId", p.GetID())
+    return nil
+}
+
+// Usage
+publisher := &Publisher{
+    StreamPath: "/live/stream1",
+    RemoteAddr: "192.168.1.100:8080",
+    Type:       "rtmp",
+}
+// Framework assigns unique ID automatically
+```
+
+**Value**:
+- Enables complete task lifecycle tracking.
+- Supports task correlation analysis in distributed systems.
+- Facilitates performance monitoring and troubleshooting.
+- Provides basic data for auditing and compliance.
+
+#### 4. Measurable Call Duration
+**Pain Point**: Performance issues are hard to pinpoint, especially in complex asynchronous systems where measuring execution time of individual components is difficult. Traditional profiling tools have limited effectiveness in asynchronous scenarios.
+
+**Implementation Principle**: The framework automatically records timestamps at key task nodes (start, end, retry). Built-in timing mechanisms precisely calculate execution duration for each task, supporting millisecond-level precision.
+
+**Code Example**:
+```go
+// SRT Sender Task
+type Sender struct {
+    task.Task
+    hls.TsInMemory
+    srt.Conn
+    Subscriber *m7s.Subscriber
+}
+
+func (s *Sender) Start() error {
+    // Framework records start time
+    s.SetAllocator(util.NewScalableMemoryAllocator(1 << util.MinPowerOf2))
+    s.Using(s.GetAllocator(), s.Subscriber)
+    s.OnStop(s.Conn.Close)
+    return nil
+}
+
+func (s *Sender) Run() error {
+    // Media stream processing, may take time
+    pesAudio, pesVideo := mpegts.CreatePESWriters()
+    return m7s.PlayBlock(s.Subscriber, func(audio *format.Mpeg2Audio) error {
+        // Process audio
+        return nil
+    }, func(video *mpegts.VideoFrame) error {
+        // Process video
+        return nil
+    })
+}
+
+func (s *Sender) Dispose() {
+    // Framework records end time, duration available
+    duration := s.GetDuration()
+    s.Info("SRT Sender finished", "duration", duration)
+}
+```
+
+**Value**:
+- Quickly identifies performance bottlenecks and hotspots.
+- Supports real-time performance monitoring and alerting.
+- Provides data support for system optimization.
+- Helps formulate reasonable timeout and retry strategies.
+
+#### 5. Extensible
+**Pain Point**: Different business scenarios require different task processing logic, but traditional frameworks often lack sufficient extensibility. Developers have to compromise between framework limitations and business needs.
+
+**Implementation Principle**: Supports inheritance and extension of various task types via Go's interface and embedding mechanisms. Provides rich hook methods (`OnStart`, `OnBeforeDispose`, `OnDispose`) allowing developers to insert custom logic at key nodes.
+
+**Task Type System**:
+- `task.Task`: Base class for all tasks.
+- `task.Job`: Container task; ends when all child tasks end.
+- `task.Work`: Like Job, but continues running after child tasks end.
+- `task.ChannelTask`: Task with custom signals.
+- `task.TickTask`: Scheduled task.
+
+**Lifecycle Methods**:
+- `Start() error`: Initialization (optional).
+- `Run() error`: Execution (blocking, optional).
+- `Go() error`: Non-blocking execution (optional).
+- `Dispose()`: Cleanup (optional).
+
+**Code Example**:
+```go
+// Stream Manager (Job Type)
+type StreamManager struct {
+    task.Job  // Ends when all children end
+    StreamPath string
+    Publishers util.Collection[string, *Publisher]
+    Subscribers util.Collection[string, *Subscriber]
+}
+
+// Stats Task (TickTask)
+type StatsTask struct {
+    task.TickTask
+    manager  *StreamManager
+    interval time.Duration
+}
+
+func (s *StatsTask) GetTickInterval() time.Duration {
+    return s.interval
+}
+
+// Cleanup Task (TickTask)
+type CleanupTask struct {
+    task.TickTask
+    manager *StreamManager
+}
+
+func (c *CleanupTask) GetTickInterval() time.Duration {
+    return 5 * time.Minute
+}
+
+// Hooks
+func (s *StreamManager) OnStart() {
+    s.Info("Stream Manager pre-start hook")
+}
+
+func (s *StreamManager) OnDispose() {
+    s.Info("Stream Manager post-dispose hook")
+}
+
+// Start
+func (s *StreamManager) Start() error {
+    // Initialize resources
+    s.Publishers = util.NewCollection[string, *Publisher]()
+    s.Subscribers = util.NewCollection[string, *Subscriber]()
+    return nil
+}
+
+// Run
+func (s *StreamManager) Run() error {
+    // Logic that blocks parent's child task goroutine
+    return nil
+}
+
+// Dispose
+func (s *StreamManager) Dispose() {
+    // Cleanup publishers and subscribers
+    s.Publishers.Range(func(key string, pub *Publisher) {
+        pub.Stop()
+    })
+    s.Subscribers.Range(func(key string, sub *Subscriber) {
+        sub.Stop()
+    })
+}
+```
+
+**Value**:
+- Supports various complex business scenarios.
+- Provides flexible customization capabilities.
+- Reduces code duplication.
+- Maintains framework simplicity and usability.
+
+#### 6. Traceable
+**Pain Point**: In complex asynchronous systems, it's hard to trace the specific execution path when issues arise. Traditional logging often provides incomplete information in asynchronous scenarios.
+
+**Implementation Principle**: Maintains task call stacks and state change history, recording the complete execution path of each task, including creation, start, execution, stop, and parent-child relationships.
+
+**Code Example**:
+```go
+// RTMP Client Task
+type RTMPClient struct {
+    task.Task
+    URL      string
+    StreamPath string
+    direction int
+    pullCtx  *PullJob
+}
+
+func (c *RTMPClient) Start() error {
+    // Framework records call stack and relationships
+    c.Info("RTMP Client started", "url", c.URL, "taskId", c.GetID())
+    return nil
+}
+
+func (c *RTMPClient) Run() error {
+    // Access complete execution path
+    c.Info("RTMP Client running", "path", c.GetExecutionPath())
+    
+    // Execute logic
+    if err := c.connect(); err != nil {
+        c.Error("RTMP connection failed", "err", err)
+        return err
+    }
+    
+    return nil
+}
+
+// Step tracing
+func (c *RTMPClient) connect() error {
+    // Record steps
+    c.Step("URLParsing", "Parse RTMP URL")
+    c.Step("Connection", "Connect to RTMP server")
+    c.Step("Handshake", "Perform RTMP handshake")
+    c.Step("Streaming", "Receive media stream")
+    return nil
+}
+```
+
+**Value**:
+- Provides complete execution path tracing.
+- Supports precise reproduction of issue scenarios.
+- Facilitates system behavior analysis and optimization.
+- Powerful tool for troubleshooting.
+
+#### 7. Fallback Mechanism
+**Pain Point**: Panics and exceptions in asynchronous systems are hard to handle; a single task crash can destabilize the entire system. Traditional exception handling is limited in asynchronous scenarios.
+
+**Implementation Principle**: Captures panics via `recover`, converting exceptions to errors that propagate upwards. Provides various error handling strategies (retry, degrade, circuit breaking) to ensure system stability.
+
+**Conditional Compilation**:
+- Default (`!taskpanic`): Panics captured as errors.
+- Debug (`taskpanic`): Panics thrown directly.
+
+**Code Example**:
+```go
+// SRT Receiver (with error handling)
+type Receiver struct {
+    task.Task
+    mpegts.MpegTsStream
+    srt.Conn
+}
+
+func (r *Receiver) Run() error {
+    defer func() {
+        if r := recover(); r != nil {
+            // Framework captures panic as error
+            r.Error("SRT Receiver panic", "panic", r)
+        }
+    }()
+    
+    // Logic that might panic
+    for !r.IsStopped() {
+        packet, err := r.ReadPacket()
+        if err != nil {
+            return err
+        }
+        
+        // Process packet
+        err = r.Feed(bytes.NewReader(packet.Data()))
+        if err != nil {
+            return err
+        }
+    }
+    
+    return r.StopReason()
+}
+
+// Server level handling
+func (s *Server) Start() error {
+    defer func() {
+        if r := recover(); r != nil {
+            s.Error("Server start exception", "panic", r)
+            // Recovery logic
+        }
+    }()
+    
+    // Server start logic
+    return nil
+}
+```
+
+**Value**:
+- Prevents single task exceptions from affecting the whole system.
+- Provides comprehensive error recovery mechanisms.
+- Supports graceful degradation and circuit breaking.
+- Greatly improves system robustness.
+
+#### 8. Optional Retry Mechanism
+**Pain Point**: External dependencies (network, DB) often fail temporarily, but unified retry strategies are lacking. Manual implementation is complex and error-prone.
+
+**Implementation Principle**: Provides configurable retry strategies (max retries, interval, backoff). Supports differentiated strategies for different error types.
+
+**Retry Details**:
+- **Trigger**: 
+  - `Start` failure: Retries `Start`.
+  - `Run`/`Go` failure: Calls `Dispose` then retries `Start`.
+- **Termination**:
+  - Max retries reached.
+  - Specific errors (`ErrStopByUser`, `ErrExit`, `ErrTaskComplete`).
+- **Configuration**: `SetRetry(maxRetry, retryInterval)`.
+
+**Code Example**:
+```go
+// HTTP File Puller (with retry)
+type HTTPFilePuller struct {
+    task.Task
+    PullJob PullJob
+    URL     string
+    MaxRetry int
+    RetryInterval time.Duration
+}
+
+func (h *HTTPFilePuller) Start() error {
+    // Retry up to 3 times, 5s interval
+    h.SetRetry(h.MaxRetry, h.RetryInterval)
+    return nil
+}
+
+func (h *HTTPFilePuller) Run() error {
+    // HTTP pull logic
+    if err := h.pullHTTPStream(); err != nil {
+        h.Error("HTTP pull failed", "url", h.URL, "err", err)
+        return err
+    }
+    return nil
+}
+
+// WebSocket Client (Infinite Retry)
+type WebSocketClient struct {
+    task.Task
+    URL string
+}
+
+func (w *WebSocketClient) Start() error {
+    // Infinite retry, 1s interval
+    w.SetRetry(-1, time.Second)
+    return nil
+}
+
+// Resource management during retry
+func (h *HTTPFilePuller) Dispose() {
+    // Cleanup before retry
+    if h.PullJob.Connection != nil {
+        h.PullJob.Connection.Close()
+    }
+    h.Info("Cleaning up HTTP connection for retry")
+}
+```
+
+**Value**:
+- Automatically handles temporary failures.
+- Improves system availability and stability.
+- Reduces complexity of manual retry logic.
+- Supports intelligent retry strategies.
+
+#### 9. Storable History Records
+**Pain Point**: Task execution history is crucial for monitoring and diagnosis but often missing in traditional frameworks.
+
+**Implementation Principle**: Automatically records key task information (ID, time, status, errors). Supports query and analysis of history data.
+
+**Code Example**:
+```go
+// Pusher Task (with history)
+type Pusher struct {
+    task.Task
+    StreamPath string
+    URL        string
+    MaxRetry   int
+}
+
+func (p *Pusher) Start() error {
+    // Set descriptions for history
+    p.SetDescriptions(task.Description{
+        "plugin":     "rtmp",
+        "streamPath": p.StreamPath,
+        "url":        p.URL,
+        "maxRetry":   p.MaxRetry,
+    })
+    return nil
+}
+
+func (p *Pusher) Run() error {
+    // Framework records history
+    p.Info("Pusher started", "url", p.URL)
+    return nil
+}
+
+// Server history
+func (s *Server) Start() error {
+    // Set server description
+    s.SetDescriptions(task.Description{
+        "version": Version,
+        "port":    s.HTTP.Port,
+    })
+    
+    // Hooks for key events
+    s.OnStart(func() {
+        s.Info("Server started")
+    })
+    
+    s.OnDispose(func() {
+        s.Info("Server stopped")
+    })
+    
+    return nil
+}
+
+// Query history
+func queryTaskHistory() {
+    history := task.GetTaskHistory()
+    for _, record := range history {
+        fmt.Printf("ID: %s, Duration: %v, Status: %s, Desc: %v\n", 
+            record.ID, record.Duration, record.Status, record.Description)
+    }
+}
+```
+
+**Value**:
+- Supports complete task execution history tracking.
+- Data foundation for monitoring and alerting.
+- Supports performance analysis and capacity planning.
+- Meets audit and compliance requirements.
 
 ## Usage Guide
 
@@ -554,7 +1119,7 @@ chmod +x dashboard/start.sh
 ./dashboard/start.sh
 ```
 
-This script automatically starts the backend service and frontend development server, and opens the browser to access the management interface.
+This script automatically builds the frontend, starts the backend service, and serves the management interface.
 
 ## Tutorial Lessons
 
@@ -592,11 +1157,8 @@ The GoTask project provides a complete tutorial lesson system located in the `le
 
 3. **Run Lessons**:
    ```bash
-   # Enter lesson directory
-   cd lessons/lesson01
-   
-   # Run lesson
-   go run main.go
+   # Run specific lesson
+   go test -v lessons/lesson01_test.go
    ```
 
 ### Course Features

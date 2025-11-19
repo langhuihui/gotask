@@ -499,7 +499,7 @@ func main() {
 	api.HandleFunc("/tasks/{id:[0-9]+}", server.getTaskHandler).Methods("GET")
 
 	// 静态文件服务
-	r.PathPrefix("/").Handler(http.FileServer(http.Dir("./web/dist")))
+	r.PathPrefix("/").Handler(http.FileServer(http.Dir("../web/dist")))
 
 	fmt.Println("GoTask Server starting on :8082...")
 	fmt.Println("API endpoints:")

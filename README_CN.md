@@ -286,7 +286,7 @@ gotask/
 │   └── .augment-guidelines # Augment AI 规则
 ├── util/
 │   └── promise.go          # Promise 实现
-├── lessons_CN/                # 教学课程
+├── lessons_CN/             # 教学课程 (测试文件)
 └── dashboard/
     ├── server/             # 后端管理服务
     └── web/                # React 前端管理界面
@@ -1129,11 +1129,11 @@ chmod +x dashboard/start.sh
 ./dashboard/start.sh
 ```
 
-该脚本会自动启动后端服务和前端开发服务器，并打开浏览器访问管理界面。
+该脚本会自动构建前端，启动后端服务，并提供管理界面访问。
 
 ## 教学课程
 
-GoTask 项目提供了完整的教学课程系统，位于 `lessons/` 目录下。该系统包含10个渐进式课程，从基础到高级，帮助开发者全面掌握 GoTask 框架。
+GoTask 项目提供了完整的教学课程系统，位于 `lessons_CN/` 目录下。该系统包含10个渐进式课程，从基础到高级，帮助开发者全面掌握 GoTask 框架。
 
 ### 课程结构
 
@@ -1167,11 +1167,8 @@ GoTask 项目提供了完整的教学课程系统，位于 `lessons/` 目录下�
 
 3. **运行课程**：
    ```bash
-   # 进入课程目录
-   cd lessons/lesson01
-   
-   # 运行课程
-   go run main.go
+   # 运行指定课程
+   go test -v lessons_CN/lesson01_test.go
    ```
 
 ### 课程特色

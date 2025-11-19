@@ -36,11 +36,8 @@ Each lesson contains TODO comments. You need to:
 
 ### 3. Running Lessons
 ```bash
-# Enter the lesson directory
-cd lessons/lesson01
-
 # Run the lesson
-go run main.go
+go test -v lesson01_test.go
 ```
 
 ### 4. Verify Learning Outcomes

@@ -36,11 +36,8 @@
 
 ### 3. 运行课程
 ```bash
-# 进入课程目录
-cd lessons/lesson01
-
 # 运行课程
-go run main.go
+go test -v lesson01_test.go
 ```
 
 ### 4. 验证学习效果
