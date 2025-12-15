@@ -42,7 +42,7 @@ type EventLoop struct {
 
 func (e *EventLoop) getInput() chan any {
 	return e.addSub.Get(func() chan any {
-		return make(chan any, 20)
+		return make(chan any, 128)
 	})
 }
 
