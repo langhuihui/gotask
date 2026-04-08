@@ -12,6 +12,7 @@ import (
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -139,6 +140,7 @@ type (
 		parentCtx                                  context.Context
 		state                                      TaskState
 		level                                      byte
+		loopGen                                    atomic.Uint32
 	}
 )
 
@@ -416,6 +418,7 @@ func (task *Task) start() bool {
 }
 
 func (task *Task) reset() {
+	task.loopGen.Add(1)
 	task.stopOnce = sync.Once{}
 	task.Context, task.CancelCauseFunc = context.WithCancelCause(task.parentCtx)
 	task.shutdown = util.NewPromise(context.Background())

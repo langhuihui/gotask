@@ -102,11 +102,7 @@ func (mt *Job) onChildDispose(child ITask) {
 }
 
 func (mt *Job) removeChild(child ITask) {
-	value, loaded := mt.children.LoadAndDelete(child.getKey())
-	if loaded {
-		if value != child {
-			panic("remove child")
-		}
+	if mt.children.CompareAndDelete(child.getKey(), child) {
 		remains := mt.Size.Add(-1)
 		mt.Debug("remove child", "id", child.GetTaskID(), "remains", remains)
 	}

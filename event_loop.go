@@ -106,6 +106,7 @@ func (e *EventLoop) add(mt *Job, sub any) (err error) {
 
 func (e *EventLoop) run(mt *Job) {
 	mt.Debug("event loop start", "jobId", mt.GetTaskID(), "type", mt.GetOwnerType())
+	myGen := mt.loopGen.Load()
 	ch := e.getInput()
 	e.cases = []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}}
 	defer func() {
@@ -119,7 +120,7 @@ func (e *EventLoop) run(mt *Job) {
 			}
 		}
 		mt.Debug("event loop exit", "jobId", mt.GetTaskID(), "type", mt.GetOwnerType())
-		if !mt.handler.keepalive() {
+		if !mt.handler.keepalive() && mt.loopGen.Load() == myGen {
 			if mt.blocked != nil {
 				mt.Stop(errors.Join(mt.blocked.StopReason(), ErrAutoStop))
 			} else {
