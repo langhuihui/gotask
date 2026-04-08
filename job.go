@@ -188,10 +188,28 @@ func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 	}
 	actual, loaded := mt.children.LoadOrStore(t.getKey(), t)
 	if loaded {
-		task.startup.Reject(ExistTaskError{
-			Task: actual.(ITask),
-		})
-		return
+		existingTask := actual.(ITask)
+		if existingTask.GetState() >= TASK_STATE_DISPOSING || existingTask.IsStopped() {
+			// Existing task is stopped/disposing/disposed, replace it with the new one
+			if !mt.children.CompareAndSwap(t.getKey(), actual, t) {
+				// CAS failed: old task was already removed by removeChild, retry LoadOrStore
+				if actual, loaded = mt.children.LoadOrStore(t.getKey(), t); loaded {
+					task.startup.Reject(ExistTaskError{
+						Task: actual.(ITask),
+					})
+					return
+				}
+			} else {
+				// CAS succeeded: compensate Size for the replaced task whose removeChild
+				// CompareAndDelete will fail (map value is now the new task)
+				mt.Size.Add(-1)
+			}
+		} else {
+			task.startup.Reject(ExistTaskError{
+				Task: existingTask,
+			})
+			return
+		}
 	}
 	var err error
 	defer func() {

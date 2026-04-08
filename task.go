@@ -452,6 +452,8 @@ func (task *Task) dispose() {
 	taskType, ownerType := task.handler.GetTaskType(), task.GetOwnerType()
 	if task.state < TASK_STATE_STARTED {
 		task.Debug("task dispose canceled", "taskId", task.ID, "taskType", taskType, "ownerType", ownerType, "state", task.state)
+		task.state = TASK_STATE_DISPOSED
+		task.shutdown.Fulfill(task.StopReason())
 		return
 	}
 	reason := task.StopReason()
