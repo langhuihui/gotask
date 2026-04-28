@@ -71,13 +71,66 @@ func (mt *Job) SetEventLoopBufferSize(size int) {
 	mt.eventLoop.SetBufferSize(size)
 }
 
+func (mt *Job) waitChildStopped(child ITask) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- child.WaitStopped()
+	}()
+
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case err := <-done:
+			return err
+		case <-ticker.C:
+			mt.Warn(
+				"wait child dispose stalled",
+				"childId", child.GetTaskID(),
+				"childType", child.GetTaskType(),
+				"childOwner", child.GetOwnerType(),
+				"childState", child.GetState(),
+				"childDescriptions", child.GetDescriptions(),
+			)
+		}
+	}
+}
+
 func (mt *Job) waitChildrenDispose(stopReason error) {
+	mt.Debug("wait children dispose begin", "reason", stopReason, "childCount", mt.Size.Load())
+	defer mt.Debug("wait children dispose end", "reason", stopReason, "childCount", mt.Size.Load())
 	mt.eventLoop.active(mt)
 	mt.children.Range(func(key, value any) bool {
 		child := value.(ITask)
+		mt.Debug(
+			"wait child dispose begin",
+			"childId", child.GetTaskID(),
+			"childType", child.GetTaskType(),
+			"childOwner", child.GetOwnerType(),
+			"childState", child.GetState(),
+			"childDescriptions", child.GetDescriptions(),
+		)
 		child.Stop(stopReason)
+		mt.Debug(
+			"wait child stop signaled",
+			"childId", child.GetTaskID(),
+			"childType", child.GetTaskType(),
+			"childOwner", child.GetOwnerType(),
+			"childState", child.GetState(),
+			"childStopReason", child.StopReason(),
+		)
 		mt.SetDescription("waitChildDispose", child.GetTaskID())
-		child.WaitStopped()
+		err := mt.waitChildStopped(child)
+		mt.Debug(
+			"wait child dispose end",
+			"childId", child.GetTaskID(),
+			"childType", child.GetTaskType(),
+			"childOwner", child.GetOwnerType(),
+			"childState", child.GetState(),
+			"childStopReason", child.StopReason(),
+			"err", err,
+			"childDescriptions", child.GetDescriptions(),
+		)
 		mt.RemoveDescription("waitChildDispose")
 		return true
 	})

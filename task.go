@@ -470,16 +470,27 @@ func (task *Task) dispose() {
 	yargs := []any{"reason", reason, "taskId", task.ID, "taskType", taskType, "ownerType", ownerType}
 	task.Debug("task dispose", yargs...)
 	defer task.Debug("task disposed", yargs...)
+	if v, ok := task.handler.(TaskPreDisposal); ok {
+		task.SetDescription("disposeProcess", "pre-dispose")
+		task.Debug("task dispose pre-dispose begin", yargs...)
+		v.PreDispose()
+		task.Debug("task dispose pre-dispose end", yargs...)
+	}
 	if job, ok := task.handler.(IJob); ok {
 		mt := job.getJob()
 		task.SetDescription("disposeProcess", "wait children")
+		task.Debug("task dispose wait children begin", append(yargs, "childCount", mt.Size.Load())...)
 		mt.waitChildrenDispose(reason)
+		task.Debug("task dispose wait children end", append(yargs, "childCount", mt.Size.Load())...)
 	}
 	task.SetDescription("disposeProcess", "self")
 	if v, ok := task.handler.(TaskDisposal); ok {
+		task.Debug("task dispose self begin", yargs...)
 		v.Dispose()
+		task.Debug("task dispose self end", yargs...)
 	}
 	task.SetDescription("disposeProcess", "resources")
+	task.Debug("task dispose resources begin", append(yargs, "resourceCount", len(task.resources))...)
 	task.stopOnce.Do(task.stop)
 	for _, resource := range task.resources {
 		switch v := resource.(type) {
@@ -494,9 +505,12 @@ func (task *Task) dispose() {
 		}
 	}
 	task.resources = task.resources[:0]
+	task.Debug("task dispose resources end", yargs...)
 	for i, listener := range task.afterDisposeListeners {
 		task.SetDescription("disposeProcess", fmt.Sprintf("a:%d/%d", i, len(task.afterDisposeListeners)))
+		task.Debug("task dispose listener begin", append(yargs, "listenerIndex", i, "listenerCount", len(task.afterDisposeListeners))...)
 		listener()
+		task.Debug("task dispose listener end", append(yargs, "listenerIndex", i, "listenerCount", len(task.afterDisposeListeners))...)
 	}
 	task.SetDescription("disposeProcess", "done")
 	task.state = TASK_STATE_DISPOSED

@@ -95,7 +95,7 @@ func (e *EventLoop) add(mt *Job, sub any) (err error) {
 	}
 	select {
 	case e.getInput() <- sub:
-		if shouldActive || mt.IsStopped() {
+		if shouldActive || !e.running.Load() || mt.IsStopped() {
 			e.active(mt)
 		}
 		return nil
