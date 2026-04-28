@@ -107,6 +107,12 @@ type (
 	TaskDisposal interface {
 		Dispose()
 	}
+	// TaskPreDisposal is called before waiting for child tasks to stop.
+	// Implement this on tasks that hold resources (e.g. ring buffer write locks)
+	// that must be released so child goroutines can unblock and terminate.
+	TaskPreDisposal interface {
+		PreDispose()
+	}
 	TaskBlock interface {
 		Run() error
 	}
