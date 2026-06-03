@@ -37,8 +37,17 @@ type EventLoop struct {
 	children []ITask
 	addSub   Singleton[chan any]
 	running  atomic.Bool
+	// loopGID 是当前 run() 所在 goroutine 的 id(run 期间非 0,退出后置 0)。
+	// 用于 Call 的重入检测:若调用方就是本循环 goroutine,入队会自死锁,必须内联执行。
+	loopGID atomic.Int64
 	// bufferSize allows configuring the channel capacity; zero uses the default.
 	bufferSize int
+}
+
+// onLoopGoroutine 报告当前 goroutine 是否就是本事件循环 run() 所在的 goroutine。
+func (e *EventLoop) onLoopGoroutine() bool {
+	gid := e.loopGID.Load()
+	return gid != 0 && gid == goID()
 }
 
 const eventLoopBaseCases = 1
@@ -106,9 +115,12 @@ func (e *EventLoop) add(mt *Job, sub any) (err error) {
 
 func (e *EventLoop) run(mt *Job) {
 	mt.Debug("event loop start", "jobId", mt.GetTaskID(), "type", mt.GetOwnerType())
+	// 记录本循环 goroutine 的 id,供 Call 重入检测;退出时清零。
+	e.loopGID.Store(goID())
 	ch := e.getInput()
 	e.cases = []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}}
 	defer func() {
+		e.loopGID.Store(0)
 		err := recover()
 		if err != nil {
 			mt.Error("job panic", "err", err, "stack", string(debug.Stack()))
