@@ -222,6 +222,15 @@ func (mt *Job) Call(callback func()) {
 		mt.Debug("call immediately done", "caller", caller, "elapsed", time.Since(startTime))
 		return
 	}
+	// 重入保护:若调用方就是本事件循环 goroutine(例如在某个 task 的 Start()/Go()
+	// 或另一个被 Call 的 callback 里又调了 Call),入队后 <-ctx.Done() 会等本循环处理,
+	// 而本循环正阻塞在这里 → 永久死锁。此时直接内联执行 —— 我们已在循环 goroutine 上,
+	// 与"由循环处理这个 callback"语义等价(单 goroutine 串行)。
+	if mt.eventLoop.onLoopGoroutine() {
+		mt.Debug("call inline (reentrant)", "caller", caller)
+		callback()
+		return
+	}
 	ctx, cancel := context.WithCancel(mt)
 	_ = mt.eventLoop.add(mt, func() {
 		startTime := time.Now()
