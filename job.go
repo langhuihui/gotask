@@ -232,7 +232,9 @@ func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 	task.handler = t
 	mt.initContext(task, opt...)
 	if mt.IsStopped() {
+		mt.Warn("[fix1] AddTask rejected: parent already stopped", "key", t.getKey(), "newId", task.ID, "reason", mt.StopReason())
 		task.startup.Reject(mt.StopReason())
+		task.CancelCauseFunc(mt.StopReason()) // also cancel task.ctx so IsStopped() returns true
 		return
 	}
 	actual, loaded := mt.children.LoadOrStore(t.getKey(), t)
@@ -243,9 +245,11 @@ func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 			if !mt.children.CompareAndSwap(t.getKey(), actual, t) {
 				// CAS failed: old task was already removed by removeChild, retry LoadOrStore
 				if actual, loaded = mt.children.LoadOrStore(t.getKey(), t); loaded {
+					mt.Warn("[fix1] AddTask rejected: CAS failed, key still occupied", "key", t.getKey(), "newId", task.ID, "existingId", actual.(ITask).GetTask().ID)
 					task.startup.Reject(ExistTaskError{
 						Task: actual.(ITask),
 					})
+					task.CancelCauseFunc(ExistTaskError{Task: actual.(ITask)}) // also cancel task.ctx
 					return
 				}
 			} else {
@@ -254,9 +258,11 @@ func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 				mt.Size.Add(-1)
 			}
 		} else {
+			mt.Warn("[fix1] AddTask rejected: key conflict, existing task still running", "key", t.getKey(), "newId", task.ID, "existingId", existingTask.GetTask().ID)
 			task.startup.Reject(ExistTaskError{
 				Task: existingTask,
 			})
+			task.CancelCauseFunc(ExistTaskError{Task: existingTask}) // also cancel task.ctx so IsStopped() returns true
 			return
 		}
 	}
@@ -264,7 +270,9 @@ func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 	defer func() {
 		if err != nil {
 			mt.children.Delete(t.getKey())
+			mt.Warn("[fix1] AddTask rejected: eventLoop/stopped after insert", "key", t.getKey(), "newId", task.ID, "reason", err)
 			task.startup.Reject(err)
+			task.CancelCauseFunc(err) // also cancel task.ctx so IsStopped() returns true
 		}
 	}()
 	if err = mt.eventLoop.add(mt, t); err != nil {

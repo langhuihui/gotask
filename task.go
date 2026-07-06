@@ -352,6 +352,14 @@ func (task *Task) checkRetry(err error) bool {
 		if delta := time.Since(task.StartTime); delta < retryDelay {
 			time.Sleep(retryDelay - delta)
 		}
+		// Re-check parent after sleep: parent may have been stopped while we were sleeping.
+		// Without this check a stale retry would proceed with a cancelled context and could
+		// call Publish() again, potentially kicking out a legitimate publisher that was
+		// created by a replacement PullJob added during the sleep window.
+		// if task.parent.IsStopped() {
+		// 	task.Warn("parent stopped after retry sleep, abort retry", "taskId", task.ID, "ownerType", task.GetOwnerType())
+		// 	return false
+		// }
 		return true
 	} else {
 		if task.retry.MaxRetry > 0 {
@@ -373,6 +381,12 @@ func (task *Task) start() bool {
 		}()
 	}
 	for {
+		// Guard against a race window: parent/task may be stopped right after
+		// checkRetry returns true and before the next retry Start() call.
+		//if task.IsStopped() || (task.parent != nil && task.parent.IsStopped()) {
+		//	task.Warn("fix-B: task/parent stopped at retry loop entry, abort retry", "taskId", task.ID, "ownerType", task.GetOwnerType())
+		//	return false
+		//}
 		task.StartTime = time.Now()
 		task.Debug("task start", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType(), "reason", task.StartReason)
 		task.state = TASK_STATE_STARTING
