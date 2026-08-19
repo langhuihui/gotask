@@ -136,7 +136,10 @@ type (
 		context.CancelCauseFunc
 		handler                                    ITask
 		retry                                      RetryConfig
-		hookMu                                     sync.Mutex // 保护下面四个钩子切片，见 OnStart
+		hookMu                                     sync.Mutex // 保护下面这组钩子字段，见 OnStart
+		startHooksRun, disposeHooksRun             bool       // 本轮的对应遍历是否已经走过
+		catchingUpStart, catchingUpDispose         bool       // 是否已有 goroutine 在排空补跑队列
+		pendingStart, pendingDispose               []func()   // 错过本轮遍历、等待补跑的监听器
 		afterStartListeners, afterDisposeListeners []func()
 		closeOnStop                                []any
 		resources                                  []any
@@ -314,16 +317,110 @@ func (task *Task) stop() {
 //
 // 约定：只在锁内取切片头快照，绝不持锁调用回调或资源清理函数——那些是调用方的
 // 代码，可能反过来调用本任务的其它方法。
+//
+// 如果注册时本轮的遍历已经走过（即任务已经启动），本次注册不可能再被那次遍历
+// 收录，于是补跑一次，而不是静默丢弃。
+//
+// 补跑走的是**队列 + 排空循环**，不是直接 listener()。两个原因：
+//
+//  1. 防止无界递归。回调体内再注册同类钩子是合法写法，直接同步调用会在调用方
+//     栈上一层层套下去直到爆栈；改成排空循环之后，嵌套注册只是往队列里追加，由
+//     外层循环接着跑，栈深度恒定。
+//  2. 让遍历期间到达的注册仍然跑在事件循环上。dispose()/start() 自己也是通过这
+//     个队列跑监听器，并在整个过程中持有 catchingUp 标志，所以那段时间内别的
+//     goroutine 注册进来只会入队、由事件循环代跑。只有在遍历彻底结束之后才注册
+//     的，才会落到注册方自己的 goroutine 上——那时事件循环已经不管这批回调了，
+//     没有别的地方可跑。
+//
+// 仍然登记进 afterStartListeners 是为了重试：checkRetry → reset → 再次 start 时
+// 这批监听器要再跑一遍，晚注册的那个也不该缺席。算上补跑的那一次，它与早注册的
+// 监听器在整个重试序列里的执行次数是相等的。
 func (task *Task) OnStart(listener func()) {
 	task.hookMu.Lock()
-	defer task.hookMu.Unlock()
 	task.afterStartListeners = append(task.afterStartListeners, listener)
+	if !task.startHooksRun {
+		task.hookMu.Unlock() // 遍历还没开始，等它收录
+		return
+	}
+	task.pendingStart = append(task.pendingStart, listener)
+	if task.catchingUpStart {
+		task.hookMu.Unlock() // 已有 goroutine 在排空，交给它，避免在本栈上递归
+		return
+	}
+	task.catchingUpStart = true
+	task.hookMu.Unlock()
+	task.drainStartHooks()
 }
 
+// OnDispose 注册一个在任务销毁后执行的回调，机制与 OnStart 完全对称。
 func (task *Task) OnDispose(listener func()) {
 	task.hookMu.Lock()
-	defer task.hookMu.Unlock()
 	task.afterDisposeListeners = append(task.afterDisposeListeners, listener)
+	if !task.disposeHooksRun {
+		task.hookMu.Unlock()
+		return
+	}
+	task.pendingDispose = append(task.pendingDispose, listener)
+	if task.catchingUpDispose {
+		task.hookMu.Unlock()
+		return
+	}
+	task.catchingUpDispose = true
+	task.hookMu.Unlock()
+	task.drainDisposeHooks(nil)
+}
+
+// drainStartHooks 排空 pendingStart。调用前必须已在锁内把 catchingUpStart 置为
+// true（表示"本 goroutine 负责跑"），本函数返回前一定会把它置回 false。
+func (task *Task) drainStartHooks() {
+	for {
+		task.hookMu.Lock()
+		queue := task.pendingStart
+		task.pendingStart = nil
+		if len(queue) == 0 {
+			task.catchingUpStart = false
+			task.hookMu.Unlock()
+			return
+		}
+		task.hookMu.Unlock()
+		for _, listener := range queue {
+			if task.IsStopped() { // 与原先遍历里的 break 语义一致：停了就不再跑剩下的
+				task.hookMu.Lock()
+				task.pendingStart = nil
+				task.catchingUpStart = false
+				task.hookMu.Unlock()
+				return
+			}
+			listener()
+		}
+	}
+}
+
+// drainDisposeHooks 排空 pendingDispose，约定同 drainStartHooks。
+// yargs 为 dispose() 传入的日志上下文，补跑路径传 nil。
+func (task *Task) drainDisposeHooks(yargs []any) {
+	for i := 0; ; {
+		task.hookMu.Lock()
+		queue := task.pendingDispose
+		task.pendingDispose = nil
+		if len(queue) == 0 {
+			task.catchingUpDispose = false
+			task.hookMu.Unlock()
+			return
+		}
+		task.hookMu.Unlock()
+		for _, listener := range queue {
+			if yargs != nil {
+				task.SetDescription("disposeProcess", fmt.Sprintf("a:%d", i))
+				task.Debug("task dispose listener begin", append(yargs, "listenerIndex", i)...)
+			}
+			listener()
+			if yargs != nil {
+				task.Debug("task dispose listener end", append(yargs, "listenerIndex", i)...)
+			}
+			i++
+		}
+	}
 }
 
 func (task *Task) Using(resource ...any) {
@@ -427,17 +524,15 @@ func (task *Task) start() bool {
 		if err == nil {
 			task.setState(TASK_STATE_STARTED)
 			task.startup.Fulfill(err)
-			// 只取快照，不清空：重试时这批监听器要再跑一遍。并发的 OnStart
-			// 只会 append 到快照 len 之后，遍历不到，因此不会互相踩。
+			// 把本轮要跑的监听器灌进补跑队列，然后由同一个排空循环跑掉——这样
+			// 遍历期间到达的 OnStart 也会被本 goroutine（事件循环）接手，而不是
+			// 落到注册方的栈上。afterStartListeners 本身不清空：重试时要再跑一遍。
 			task.hookMu.Lock()
-			startListeners := task.afterStartListeners
+			task.pendingStart = append(task.pendingStart, task.afterStartListeners...)
+			task.startHooksRun = true
+			task.catchingUpStart = true
 			task.hookMu.Unlock()
-			for _, listener := range startListeners {
-				if task.IsStopped() {
-					break
-				}
-				listener()
-			}
+			task.drainStartHooks()
 			if task.IsStopped() {
 				err = task.StopReason()
 			} else {
@@ -474,6 +569,14 @@ func (task *Task) start() bool {
 }
 
 func (task *Task) reset() {
+	// 重试是新的一轮：两批监听器都要再跑一遍，标志随之复位，上一轮没排完的
+	// 补跑队列作废（下一轮 start/dispose 会把完整名单重新灌进去）。
+	// catchingUp 不动：它为 true 就意味着有 goroutine 正在排空，由那个
+	// goroutine 自己置回 false——它下一次取到空队列就会退出。
+	task.hookMu.Lock()
+	task.startHooksRun, task.disposeHooksRun = false, false
+	task.pendingStart, task.pendingDispose = nil, nil
+	task.hookMu.Unlock()
 	task.loopGen.Add(1)
 	task.stopOnce = sync.Once{}
 	task.Context, task.CancelCauseFunc = context.WithCancelCause(task.parentCtx)
@@ -566,16 +669,14 @@ func (task *Task) dispose() {
 		}
 	}
 	task.Debug("task dispose resources end", yargs...)
-	// 同 start()：只取快照、不清空，重试时这批监听器要再跑一遍。
+	// 同 start()：灌进补跑队列后由排空循环跑掉，遍历期间到达的 OnDispose 由本
+	// goroutine（事件循环）接手。afterDisposeListeners 不清空，重试时要再跑一遍。
 	task.hookMu.Lock()
-	disposeListeners := task.afterDisposeListeners
+	task.pendingDispose = append(task.pendingDispose, task.afterDisposeListeners...)
+	task.disposeHooksRun = true
+	task.catchingUpDispose = true
 	task.hookMu.Unlock()
-	for i, listener := range disposeListeners {
-		task.SetDescription("disposeProcess", fmt.Sprintf("a:%d/%d", i, len(disposeListeners)))
-		task.Debug("task dispose listener begin", append(yargs, "listenerIndex", i, "listenerCount", len(disposeListeners))...)
-		listener()
-		task.Debug("task dispose listener end", append(yargs, "listenerIndex", i, "listenerCount", len(disposeListeners))...)
-	}
+	task.drainDisposeHooks(yargs)
 	task.SetDescription("disposeProcess", "done")
 	task.setState(TASK_STATE_DISPOSED)
 	task.shutdown.Fulfill(reason)
