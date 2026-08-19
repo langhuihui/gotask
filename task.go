@@ -144,7 +144,7 @@ type (
 		startup, shutdown                          *util.Promise
 		parent                                     *Job
 		parentCtx                                  context.Context
-		state                                      TaskState
+		state                                      atomic.Uint32 // a TaskState; see GetState/setState
 		level                                      byte
 		loopGen                                    atomic.Uint32
 	}
@@ -158,8 +158,16 @@ func (*Task) keepalive() bool {
 	return false
 }
 
+// GetState reports the task's lifecycle state. It is safe to call from any
+// goroutine: the state is written by whichever event loop owns the task, and
+// read by others (the parent loop during teardown, AddTask when resolving a key
+// conflict, WorkCollection lookups).
 func (task *Task) GetState() TaskState {
-	return task.state
+	return TaskState(task.state.Load())
+}
+
+func (task *Task) setState(state TaskState) {
+	task.state.Store(uint32(state))
 }
 
 func (task *Task) GetLevel() byte {
@@ -389,12 +397,12 @@ func (task *Task) start() bool {
 		//}
 		task.StartTime = time.Now()
 		task.Debug("task start", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType(), "reason", task.StartReason)
-		task.state = TASK_STATE_STARTING
+		task.setState(TASK_STATE_STARTING)
 		if v, ok := task.handler.(TaskStarter); ok {
 			err = v.Start()
 		}
 		if err == nil {
-			task.state = TASK_STATE_STARTED
+			task.setState(TASK_STATE_STARTED)
 			task.startup.Fulfill(err)
 			for _, listener := range task.afterStartListeners {
 				if task.IsStopped() {
@@ -407,7 +415,7 @@ func (task *Task) start() bool {
 			} else {
 				task.ResetRetryCount()
 				if runHandler, ok := task.handler.(TaskBlock); ok {
-					task.state = TASK_STATE_RUNNING
+					task.setState(TASK_STATE_RUNNING)
 					task.Debug("task run", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
 					err = runHandler.Run()
 					if err == nil {
@@ -418,7 +426,7 @@ func (task *Task) start() bool {
 		}
 		if err == nil {
 			if goHandler, ok := task.handler.(TaskGo); ok {
-				task.state = TASK_STATE_GOING
+				task.setState(TASK_STATE_GOING)
 				task.Debug("task go", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
 				go task.run(goHandler.Go)
 			}
@@ -473,14 +481,14 @@ func (task *Task) SetDescriptions(value Description) {
 
 func (task *Task) dispose() {
 	taskType, ownerType := task.handler.GetTaskType(), task.GetOwnerType()
-	if task.state < TASK_STATE_STARTED {
-		task.Debug("task dispose canceled", "taskId", task.ID, "taskType", taskType, "ownerType", ownerType, "state", task.state)
-		task.state = TASK_STATE_DISPOSED
+	if task.GetState() < TASK_STATE_STARTED {
+		task.Debug("task dispose canceled", "taskId", task.ID, "taskType", taskType, "ownerType", ownerType, "state", task.GetState())
+		task.setState(TASK_STATE_DISPOSED)
 		task.shutdown.Fulfill(task.StopReason())
 		return
 	}
 	reason := task.StopReason()
-	task.state = TASK_STATE_DISPOSING
+	task.setState(TASK_STATE_DISPOSING)
 	yargs := []any{"reason", reason, "taskId", task.ID, "taskType", taskType, "ownerType", ownerType}
 	task.Debug("task dispose", yargs...)
 	defer task.Debug("task disposed", yargs...)
@@ -527,7 +535,7 @@ func (task *Task) dispose() {
 		task.Debug("task dispose listener end", append(yargs, "listenerIndex", i, "listenerCount", len(task.afterDisposeListeners))...)
 	}
 	task.SetDescription("disposeProcess", "done")
-	task.state = TASK_STATE_DISPOSED
+	task.setState(TASK_STATE_DISPOSED)
 	task.shutdown.Fulfill(reason)
 }
 

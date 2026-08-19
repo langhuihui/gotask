@@ -55,7 +55,7 @@ func (m *RootManager[K, T]) Init() {
 	m.Logger = slog.New(slog.NewTextHandler(os.Stdout, nil))
 	m.StartTime = time.Now()
 	m.AddTask(&OSSignal{root: m}).WaitStarted()
-	m.state = TASK_STATE_STARTED
+	m.setState(TASK_STATE_STARTED)
 }
 
 // Shutdown 关闭根任务管理器

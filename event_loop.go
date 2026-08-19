@@ -128,19 +128,28 @@ func (e *EventLoop) run(mt *Job) {
 			}
 		}
 		mt.blocked = nil
+		// Release the loop as the very last action, after every write to shared
+		// loop state. active() starts a replacement run() as soon as it observes
+		// running==false, and that replacement immediately writes e.cases and
+		// mt.blocked; clearing the flag from inside the loop body (as before) let
+		// it overlap this teardown, which writes mt.blocked above.
+		//
+		// Re-check the input channel AFTER the store so an add() that enqueued
+		// while we were tearing down is not lost: if that add() observed
+		// running==true it skipped active(), and the store below is what makes it
+		// visible to us. len() on a channel is safe for concurrent use.
+		e.running.Store(false)
+		if len(ch) > 0 {
+			e.active(mt)
+		}
 	}()
 
-	// Main event loop - only exit when no more events AND no children
+	// Main event loop - only exit when no more events AND no children. The
+	// running flag is released by the deferred teardown above, not here.
 	for {
 		mt.blocked = nil
 		if len(ch) == 0 && len(e.children) == 0 {
-			if e.running.CompareAndSwap(true, false) {
-				if len(ch) > 0 { // if add before running set to false
-					mt.Warn("job addSub channel after change running to false", "jobId", mt.GetTaskID())
-					e.active(mt)
-				}
-				return
-			}
+			return
 		}
 		if chosen, rev, ok := reflect.Select(e.cases); chosen == 0 {
 			switch v := rev.Interface().(type) {
