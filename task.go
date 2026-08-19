@@ -136,6 +136,7 @@ type (
 		context.CancelCauseFunc
 		handler                                    ITask
 		retry                                      RetryConfig
+		hookMu                                     sync.Mutex // 保护下面四个钩子切片，见 OnStart
 		afterStartListeners, afterDisposeListeners []func()
 		closeOnStop                                []any
 		resources                                  []any
@@ -285,8 +286,14 @@ func (task *Task) Stop(err error) {
 
 func (task *Task) stop() {
 	task.WaitStarted() // wait for task to set closeOnStop
-	task.Debug("task stop", "taskId", task.ID, "ownerType", task.GetOwnerType(), "closeOnStop", len(task.closeOnStop))
-	for _, resource := range task.closeOnStop {
+	// 锁内取走整份，锁外逐个处理。置 nil 而不是 [:0]：后者会把底层数组留给
+	// 后续 append 复用，而那次 append 就会覆盖我们正在遍历的元素。
+	task.hookMu.Lock()
+	closeOnStop := task.closeOnStop
+	task.closeOnStop = nil
+	task.hookMu.Unlock()
+	task.Debug("task stop", "taskId", task.ID, "ownerType", task.GetOwnerType(), "closeOnStop", len(closeOnStop))
+	for _, resource := range closeOnStop {
 		switch v := resource.(type) {
 		case func():
 			v()
@@ -296,18 +303,32 @@ func (task *Task) stop() {
 			v.Stop(task.StopReason())
 		}
 	}
-	task.closeOnStop = task.closeOnStop[:0]
 }
 
+// OnStart 注册一个在任务启动后执行的回调。
+//
+// 四个钩子注册方法（OnStart/OnDispose/OnStop/Using）都往 Task 上的切片里
+// append，而它们的消费端（start/stop/dispose）遍历同一批切片。注册端跑在任意
+// goroutine 上——通常是调用 AddTask 的那个业务 goroutine——消费端跑在持有本
+// 任务的事件循环 goroutine 上，两端必须由 hookMu 互斥。
+//
+// 约定：只在锁内取切片头快照，绝不持锁调用回调或资源清理函数——那些是调用方的
+// 代码，可能反过来调用本任务的其它方法。
 func (task *Task) OnStart(listener func()) {
+	task.hookMu.Lock()
+	defer task.hookMu.Unlock()
 	task.afterStartListeners = append(task.afterStartListeners, listener)
 }
 
 func (task *Task) OnDispose(listener func()) {
+	task.hookMu.Lock()
+	defer task.hookMu.Unlock()
 	task.afterDisposeListeners = append(task.afterDisposeListeners, listener)
 }
 
 func (task *Task) Using(resource ...any) {
+	task.hookMu.Lock()
+	defer task.hookMu.Unlock()
 	task.resources = append(task.resources, resource...)
 }
 
@@ -315,6 +336,8 @@ func (task *Task) OnStop(resource any) {
 	if t, ok := resource.(ITask); ok && t.GetTask() == task {
 		panic("onStop resource is task itself")
 	}
+	task.hookMu.Lock()
+	defer task.hookMu.Unlock()
 	task.closeOnStop = append(task.closeOnStop, resource)
 }
 
@@ -404,7 +427,12 @@ func (task *Task) start() bool {
 		if err == nil {
 			task.setState(TASK_STATE_STARTED)
 			task.startup.Fulfill(err)
-			for _, listener := range task.afterStartListeners {
+			// 只取快照，不清空：重试时这批监听器要再跑一遍。并发的 OnStart
+			// 只会 append 到快照 len 之后，遍历不到，因此不会互相踩。
+			task.hookMu.Lock()
+			startListeners := task.afterStartListeners
+			task.hookMu.Unlock()
+			for _, listener := range startListeners {
 				if task.IsStopped() {
 					break
 				}
@@ -512,9 +540,20 @@ func (task *Task) dispose() {
 		task.Debug("task dispose self end", yargs...)
 	}
 	task.SetDescription("disposeProcess", "resources")
-	task.Debug("task dispose resources begin", append(yargs, "resourceCount", len(task.resources))...)
+	task.hookMu.Lock()
+	resourceCount := len(task.resources)
+	task.hookMu.Unlock()
+	task.Debug("task dispose resources begin", append(yargs, "resourceCount", resourceCount)...)
 	task.stopOnce.Do(task.stop)
-	for _, resource := range task.resources {
+	// 快照**必须取在 stop() 之后**：原来的 `for range task.resources` 是在
+	// stop() 返回之后才求值 range 表达式的，而 stop() 会跑 closeOnStop 回调，
+	// 那些回调可能再 Using() 新资源。把取快照提到 stop() 之前会把它们漏掉——
+	// 这是加锁重构时极容易顺手改坏的一处顺序。
+	task.hookMu.Lock()
+	resources := task.resources
+	task.resources = nil
+	task.hookMu.Unlock()
+	for _, resource := range resources {
 		switch v := resource.(type) {
 		case func():
 			v()
@@ -526,13 +565,16 @@ func (task *Task) dispose() {
 			v.Close()
 		}
 	}
-	task.resources = task.resources[:0]
 	task.Debug("task dispose resources end", yargs...)
-	for i, listener := range task.afterDisposeListeners {
-		task.SetDescription("disposeProcess", fmt.Sprintf("a:%d/%d", i, len(task.afterDisposeListeners)))
-		task.Debug("task dispose listener begin", append(yargs, "listenerIndex", i, "listenerCount", len(task.afterDisposeListeners))...)
+	// 同 start()：只取快照、不清空，重试时这批监听器要再跑一遍。
+	task.hookMu.Lock()
+	disposeListeners := task.afterDisposeListeners
+	task.hookMu.Unlock()
+	for i, listener := range disposeListeners {
+		task.SetDescription("disposeProcess", fmt.Sprintf("a:%d/%d", i, len(disposeListeners)))
+		task.Debug("task dispose listener begin", append(yargs, "listenerIndex", i, "listenerCount", len(disposeListeners))...)
 		listener()
-		task.Debug("task dispose listener end", append(yargs, "listenerIndex", i, "listenerCount", len(task.afterDisposeListeners))...)
+		task.Debug("task dispose listener end", append(yargs, "listenerIndex", i, "listenerCount", len(disposeListeners))...)
 	}
 	task.SetDescription("disposeProcess", "done")
 	task.setState(TASK_STATE_DISPOSED)
