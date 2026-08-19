@@ -136,12 +136,23 @@ func (mt *Job) waitChildrenDispose(stopReason error) {
 	})
 }
 
+// OnDescendantsDispose 注册后代任务销毁时的回调。
+//
+// 与 Task 上那四个钩子同理，用内嵌 Task 的 hookMu 保护——注册端在业务
+// goroutine，消费端在事件循环 goroutine。这里的波及面还更大一些：
+// onDescendantsDispose 会一路向上传播到祖先，也就是**祖先的切片会被后代的事件
+// 循环 goroutine 读**。向上传播时取的是各自 Job 的锁，只上行不回环，不会死锁。
 func (mt *Job) OnDescendantsDispose(listener func(ITask)) {
+	mt.hookMu.Lock()
+	defer mt.hookMu.Unlock()
 	mt.descendantsDisposeListeners = append(mt.descendantsDisposeListeners, listener)
 }
 
 func (mt *Job) onDescendantsDispose(descendants ITask) {
-	for _, listener := range mt.descendantsDisposeListeners {
+	mt.hookMu.Lock()
+	listeners := mt.descendantsDisposeListeners
+	mt.hookMu.Unlock()
+	for _, listener := range listeners {
 		listener(descendants)
 	}
 	if mt.parent != nil {
@@ -161,12 +172,18 @@ func (mt *Job) removeChild(child ITask) {
 	}
 }
 
+// OnDescendantsStart 注册后代任务启动时的回调，同步方式见 OnDescendantsDispose。
 func (mt *Job) OnDescendantsStart(listener func(ITask)) {
+	mt.hookMu.Lock()
+	defer mt.hookMu.Unlock()
 	mt.descendantsStartListeners = append(mt.descendantsStartListeners, listener)
 }
 
 func (mt *Job) onDescendantsStart(descendants ITask) {
-	for _, listener := range mt.descendantsStartListeners {
+	mt.hookMu.Lock()
+	listeners := mt.descendantsStartListeners
+	mt.hookMu.Unlock()
+	for _, listener := range listeners {
 		listener(descendants)
 	}
 	if mt.parent != nil {
