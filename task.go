@@ -137,6 +137,7 @@ type (
 		handler                                    ITask
 		retry                                      RetryConfig
 		hookMu                                     sync.Mutex // 保护下面这组钩子字段，见 OnStart
+		hookGen                                    uint32     // 钩子代际，reset() 每轮 +1，见 drainStartHooks
 		startHooksRun, disposeHooksRun             bool       // 本轮的对应遍历是否已经走过
 		catchingUpStart, catchingUpDispose         bool       // 是否已有 goroutine 在排空补跑队列
 		pendingStart, pendingDispose               []func()   // 错过本轮遍历、等待补跑的监听器
@@ -348,8 +349,9 @@ func (task *Task) OnStart(listener func()) {
 		return
 	}
 	task.catchingUpStart = true
+	gen := task.hookGen
 	task.hookMu.Unlock()
-	task.drainStartHooks()
+	task.drainStartHooks(gen)
 }
 
 // OnDispose 注册一个在任务销毁后执行的回调，机制与 OnStart 完全对称。
@@ -366,15 +368,29 @@ func (task *Task) OnDispose(listener func()) {
 		return
 	}
 	task.catchingUpDispose = true
+	gen := task.hookGen
 	task.hookMu.Unlock()
-	task.drainDisposeHooks(nil)
+	task.drainDisposeHooks(nil, gen)
 }
 
 // drainStartHooks 排空 pendingStart。调用前必须已在锁内把 catchingUpStart 置为
-// true（表示"本 goroutine 负责跑"），本函数返回前一定会把它置回 false。
-func (task *Task) drainStartHooks() {
+// true（表示"本 goroutine 负责跑"）并取走当时的 hookGen。
+//
+// gen 是代际护栏。补跑排空跑在**任意** goroutine 上（晚注册时就是注册方自己的），
+// 而 reset() 可能在它还没退出时就开启下一轮。没有护栏的话，上一轮遗留的排空者会与
+// 下一轮由事件循环发起的排空并存，共用同一组字段：它只要先取到锁，就会取走下一轮
+// 的队列（跑在错误的 goroutine 上），或看到队列已被取空而把 catchingUpStart 置回
+// false（此后到达的注册不再由事件循环代跑）。
+//
+// 所以代际不符时必须**原样退出**：既不取队列，也不动 catchingUpStart——当前代际的
+// 排空者会自己收尾。已经取到手的那批仍然跑完，中途丢弃才是真的漏执行。
+func (task *Task) drainStartHooks(gen uint32) {
 	for {
 		task.hookMu.Lock()
+		if task.hookGen != gen {
+			task.hookMu.Unlock()
+			return
+		}
 		queue := task.pendingStart
 		task.pendingStart = nil
 		if len(queue) == 0 {
@@ -386,8 +402,10 @@ func (task *Task) drainStartHooks() {
 		for _, listener := range queue {
 			if task.IsStopped() { // 与原先遍历里的 break 语义一致：停了就不再跑剩下的
 				task.hookMu.Lock()
-				task.pendingStart = nil
-				task.catchingUpStart = false
+				if task.hookGen == gen { // 同上：换代之后这两个字段已经不归本 goroutine 管
+					task.pendingStart = nil
+					task.catchingUpStart = false
+				}
 				task.hookMu.Unlock()
 				return
 			}
@@ -396,11 +414,15 @@ func (task *Task) drainStartHooks() {
 	}
 }
 
-// drainDisposeHooks 排空 pendingDispose，约定同 drainStartHooks。
+// drainDisposeHooks 排空 pendingDispose，约定与代际护栏同 drainStartHooks。
 // yargs 为 dispose() 传入的日志上下文，补跑路径传 nil。
-func (task *Task) drainDisposeHooks(yargs []any) {
+func (task *Task) drainDisposeHooks(yargs []any, gen uint32) {
 	for i := 0; ; {
 		task.hookMu.Lock()
+		if task.hookGen != gen {
+			task.hookMu.Unlock()
+			return
+		}
 		queue := task.pendingDispose
 		task.pendingDispose = nil
 		if len(queue) == 0 {
@@ -531,8 +553,9 @@ func (task *Task) start() bool {
 			task.pendingStart = append(task.pendingStart, task.afterStartListeners...)
 			task.startHooksRun = true
 			task.catchingUpStart = true
+			startGen := task.hookGen
 			task.hookMu.Unlock()
-			task.drainStartHooks()
+			task.drainStartHooks(startGen)
 			if task.IsStopped() {
 				err = task.StopReason()
 			} else {
@@ -571,9 +594,15 @@ func (task *Task) start() bool {
 func (task *Task) reset() {
 	// 重试是新的一轮：两批监听器都要再跑一遍，标志随之复位，上一轮没排完的
 	// 补跑队列作废（下一轮 start/dispose 会把完整名单重新灌进去）。
-	// catchingUp 不动：它为 true 就意味着有 goroutine 正在排空，由那个
-	// goroutine 自己置回 false——它下一次取到空队列就会退出。
+	//
+	// hookGen +1 是给上一轮那些可能还没退出的排空 goroutine 立的界碑：它们跑在
+	// 任意 goroutine 上，reset() 拦不住，只能让它们下次取锁时自己发现换代了并
+	// 原样退出，别去碰下一轮的队列与 catchingUp。详见 drainStartHooks。
+	//
+	// catchingUp 不动：换代后它归下一轮的排空者管——下一轮 start()/dispose() 会
+	// 重新置 true 并在排空结束时置回 false。
 	task.hookMu.Lock()
+	task.hookGen++
 	task.startHooksRun, task.disposeHooksRun = false, false
 	task.pendingStart, task.pendingDispose = nil, nil
 	task.hookMu.Unlock()
@@ -675,8 +704,9 @@ func (task *Task) dispose() {
 	task.pendingDispose = append(task.pendingDispose, task.afterDisposeListeners...)
 	task.disposeHooksRun = true
 	task.catchingUpDispose = true
+	disposeGen := task.hookGen
 	task.hookMu.Unlock()
-	task.drainDisposeHooks(yargs)
+	task.drainDisposeHooks(yargs, disposeGen)
 	task.SetDescription("disposeProcess", "done")
 	task.setState(TASK_STATE_DISPOSED)
 	task.shutdown.Fulfill(reason)
