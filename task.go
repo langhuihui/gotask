@@ -136,6 +136,11 @@ type (
 		context.CancelCauseFunc
 		handler                                    ITask
 		retry                                      RetryConfig
+		hookMu                                     sync.Mutex // 保护下面这组钩子字段，见 OnStart
+		hookGen                                    uint32     // 钩子代际，reset() 每轮 +1，见 drainStartHooks
+		startHooksRun, disposeHooksRun             bool       // 本轮的对应遍历是否已经走过
+		catchingUpStart, catchingUpDispose         bool       // 是否已有 goroutine 在排空补跑队列
+		pendingStart, pendingDispose               []func()   // 错过本轮遍历、等待补跑的监听器
 		afterStartListeners, afterDisposeListeners []func()
 		closeOnStop                                []any
 		resources                                  []any
@@ -285,8 +290,14 @@ func (task *Task) Stop(err error) {
 
 func (task *Task) stop() {
 	task.WaitStarted() // wait for task to set closeOnStop
-	task.Debug("task stop", "taskId", task.ID, "ownerType", task.GetOwnerType(), "closeOnStop", len(task.closeOnStop))
-	for _, resource := range task.closeOnStop {
+	// 锁内取走整份，锁外逐个处理。置 nil 而不是 [:0]：后者会把底层数组留给
+	// 后续 append 复用，而那次 append 就会覆盖我们正在遍历的元素。
+	task.hookMu.Lock()
+	closeOnStop := task.closeOnStop
+	task.closeOnStop = nil
+	task.hookMu.Unlock()
+	task.Debug("task stop", "taskId", task.ID, "ownerType", task.GetOwnerType(), "closeOnStop", len(closeOnStop))
+	for _, resource := range closeOnStop {
 		switch v := resource.(type) {
 		case func():
 			v()
@@ -296,18 +307,147 @@ func (task *Task) stop() {
 			v.Stop(task.StopReason())
 		}
 	}
-	task.closeOnStop = task.closeOnStop[:0]
 }
 
+// OnStart 注册一个在任务启动后执行的回调。
+//
+// 四个钩子注册方法（OnStart/OnDispose/OnStop/Using）都往 Task 上的切片里
+// append，而它们的消费端（start/stop/dispose）遍历同一批切片。注册端跑在任意
+// goroutine 上——通常是调用 AddTask 的那个业务 goroutine——消费端跑在持有本
+// 任务的事件循环 goroutine 上，两端必须由 hookMu 互斥。
+//
+// 约定：只在锁内取切片头快照，绝不持锁调用回调或资源清理函数——那些是调用方的
+// 代码，可能反过来调用本任务的其它方法。
+//
+// 如果注册时本轮的遍历已经走过（即任务已经启动），本次注册不可能再被那次遍历
+// 收录，于是补跑一次，而不是静默丢弃。
+//
+// 补跑走的是**队列 + 排空循环**，不是直接 listener()。两个原因：
+//
+//  1. 防止无界递归。回调体内再注册同类钩子是合法写法，直接同步调用会在调用方
+//     栈上一层层套下去直到爆栈；改成排空循环之后，嵌套注册只是往队列里追加，由
+//     外层循环接着跑，栈深度恒定。
+//  2. 让遍历期间到达的注册仍然跑在事件循环上。dispose()/start() 自己也是通过这
+//     个队列跑监听器，并在整个过程中持有 catchingUp 标志，所以那段时间内别的
+//     goroutine 注册进来只会入队、由事件循环代跑。只有在遍历彻底结束之后才注册
+//     的，才会落到注册方自己的 goroutine 上——那时事件循环已经不管这批回调了，
+//     没有别的地方可跑。
+//
+// 仍然登记进 afterStartListeners 是为了重试：checkRetry → reset → 再次 start 时
+// 这批监听器要再跑一遍，晚注册的那个也不该缺席。算上补跑的那一次，它与早注册的
+// 监听器在整个重试序列里的执行次数是相等的。
 func (task *Task) OnStart(listener func()) {
+	task.hookMu.Lock()
 	task.afterStartListeners = append(task.afterStartListeners, listener)
+	if !task.startHooksRun {
+		task.hookMu.Unlock() // 遍历还没开始，等它收录
+		return
+	}
+	task.pendingStart = append(task.pendingStart, listener)
+	if task.catchingUpStart {
+		task.hookMu.Unlock() // 已有 goroutine 在排空，交给它，避免在本栈上递归
+		return
+	}
+	task.catchingUpStart = true
+	gen := task.hookGen
+	task.hookMu.Unlock()
+	task.drainStartHooks(gen)
 }
 
+// OnDispose 注册一个在任务销毁后执行的回调，机制与 OnStart 完全对称。
 func (task *Task) OnDispose(listener func()) {
+	task.hookMu.Lock()
 	task.afterDisposeListeners = append(task.afterDisposeListeners, listener)
+	if !task.disposeHooksRun {
+		task.hookMu.Unlock()
+		return
+	}
+	task.pendingDispose = append(task.pendingDispose, listener)
+	if task.catchingUpDispose {
+		task.hookMu.Unlock()
+		return
+	}
+	task.catchingUpDispose = true
+	gen := task.hookGen
+	task.hookMu.Unlock()
+	task.drainDisposeHooks(nil, gen)
+}
+
+// drainStartHooks 排空 pendingStart。调用前必须已在锁内把 catchingUpStart 置为
+// true（表示"本 goroutine 负责跑"）并取走当时的 hookGen。
+//
+// gen 是代际护栏。补跑排空跑在**任意** goroutine 上（晚注册时就是注册方自己的），
+// 而 reset() 可能在它还没退出时就开启下一轮。没有护栏的话，上一轮遗留的排空者会与
+// 下一轮由事件循环发起的排空并存，共用同一组字段：它只要先取到锁，就会取走下一轮
+// 的队列（跑在错误的 goroutine 上），或看到队列已被取空而把 catchingUpStart 置回
+// false（此后到达的注册不再由事件循环代跑）。
+//
+// 所以代际不符时必须**原样退出**：既不取队列，也不动 catchingUpStart——当前代际的
+// 排空者会自己收尾。已经取到手的那批仍然跑完，中途丢弃才是真的漏执行。
+func (task *Task) drainStartHooks(gen uint32) {
+	for {
+		task.hookMu.Lock()
+		if task.hookGen != gen {
+			task.hookMu.Unlock()
+			return
+		}
+		queue := task.pendingStart
+		task.pendingStart = nil
+		if len(queue) == 0 {
+			task.catchingUpStart = false
+			task.hookMu.Unlock()
+			return
+		}
+		task.hookMu.Unlock()
+		for _, listener := range queue {
+			if task.IsStopped() { // 与原先遍历里的 break 语义一致：停了就不再跑剩下的
+				task.hookMu.Lock()
+				if task.hookGen == gen { // 同上：换代之后这两个字段已经不归本 goroutine 管
+					task.pendingStart = nil
+					task.catchingUpStart = false
+				}
+				task.hookMu.Unlock()
+				return
+			}
+			listener()
+		}
+	}
+}
+
+// drainDisposeHooks 排空 pendingDispose，约定与代际护栏同 drainStartHooks。
+// yargs 为 dispose() 传入的日志上下文，补跑路径传 nil。
+func (task *Task) drainDisposeHooks(yargs []any, gen uint32) {
+	for i := 0; ; {
+		task.hookMu.Lock()
+		if task.hookGen != gen {
+			task.hookMu.Unlock()
+			return
+		}
+		queue := task.pendingDispose
+		task.pendingDispose = nil
+		if len(queue) == 0 {
+			task.catchingUpDispose = false
+			task.hookMu.Unlock()
+			return
+		}
+		task.hookMu.Unlock()
+		for _, listener := range queue {
+			if yargs != nil {
+				task.SetDescription("disposeProcess", fmt.Sprintf("a:%d", i))
+				task.Debug("task dispose listener begin", append(yargs, "listenerIndex", i)...)
+			}
+			listener()
+			if yargs != nil {
+				task.Debug("task dispose listener end", append(yargs, "listenerIndex", i)...)
+			}
+			i++
+		}
+	}
 }
 
 func (task *Task) Using(resource ...any) {
+	task.hookMu.Lock()
+	defer task.hookMu.Unlock()
 	task.resources = append(task.resources, resource...)
 }
 
@@ -315,6 +455,8 @@ func (task *Task) OnStop(resource any) {
 	if t, ok := resource.(ITask); ok && t.GetTask() == task {
 		panic("onStop resource is task itself")
 	}
+	task.hookMu.Lock()
+	defer task.hookMu.Unlock()
 	task.closeOnStop = append(task.closeOnStop, resource)
 }
 
@@ -404,12 +546,16 @@ func (task *Task) start() bool {
 		if err == nil {
 			task.setState(TASK_STATE_STARTED)
 			task.startup.Fulfill(err)
-			for _, listener := range task.afterStartListeners {
-				if task.IsStopped() {
-					break
-				}
-				listener()
-			}
+			// 把本轮要跑的监听器灌进补跑队列，然后由同一个排空循环跑掉——这样
+			// 遍历期间到达的 OnStart 也会被本 goroutine（事件循环）接手，而不是
+			// 落到注册方的栈上。afterStartListeners 本身不清空：重试时要再跑一遍。
+			task.hookMu.Lock()
+			task.pendingStart = append(task.pendingStart, task.afterStartListeners...)
+			task.startHooksRun = true
+			task.catchingUpStart = true
+			startGen := task.hookGen
+			task.hookMu.Unlock()
+			task.drainStartHooks(startGen)
 			if task.IsStopped() {
 				err = task.StopReason()
 			} else {
@@ -446,6 +592,20 @@ func (task *Task) start() bool {
 }
 
 func (task *Task) reset() {
+	// 重试是新的一轮：两批监听器都要再跑一遍，标志随之复位，上一轮没排完的
+	// 补跑队列作废（下一轮 start/dispose 会把完整名单重新灌进去）。
+	//
+	// hookGen +1 是给上一轮那些可能还没退出的排空 goroutine 立的界碑：它们跑在
+	// 任意 goroutine 上，reset() 拦不住，只能让它们下次取锁时自己发现换代了并
+	// 原样退出，别去碰下一轮的队列与 catchingUp。详见 drainStartHooks。
+	//
+	// catchingUp 不动：换代后它归下一轮的排空者管——下一轮 start()/dispose() 会
+	// 重新置 true 并在排空结束时置回 false。
+	task.hookMu.Lock()
+	task.hookGen++
+	task.startHooksRun, task.disposeHooksRun = false, false
+	task.pendingStart, task.pendingDispose = nil, nil
+	task.hookMu.Unlock()
 	task.loopGen.Add(1)
 	task.stopOnce = sync.Once{}
 	task.Context, task.CancelCauseFunc = context.WithCancelCause(task.parentCtx)
@@ -512,9 +672,20 @@ func (task *Task) dispose() {
 		task.Debug("task dispose self end", yargs...)
 	}
 	task.SetDescription("disposeProcess", "resources")
-	task.Debug("task dispose resources begin", append(yargs, "resourceCount", len(task.resources))...)
+	task.hookMu.Lock()
+	resourceCount := len(task.resources)
+	task.hookMu.Unlock()
+	task.Debug("task dispose resources begin", append(yargs, "resourceCount", resourceCount)...)
 	task.stopOnce.Do(task.stop)
-	for _, resource := range task.resources {
+	// 快照**必须取在 stop() 之后**：原来的 `for range task.resources` 是在
+	// stop() 返回之后才求值 range 表达式的，而 stop() 会跑 closeOnStop 回调，
+	// 那些回调可能再 Using() 新资源。把取快照提到 stop() 之前会把它们漏掉——
+	// 这是加锁重构时极容易顺手改坏的一处顺序。
+	task.hookMu.Lock()
+	resources := task.resources
+	task.resources = nil
+	task.hookMu.Unlock()
+	for _, resource := range resources {
 		switch v := resource.(type) {
 		case func():
 			v()
@@ -526,14 +697,16 @@ func (task *Task) dispose() {
 			v.Close()
 		}
 	}
-	task.resources = task.resources[:0]
 	task.Debug("task dispose resources end", yargs...)
-	for i, listener := range task.afterDisposeListeners {
-		task.SetDescription("disposeProcess", fmt.Sprintf("a:%d/%d", i, len(task.afterDisposeListeners)))
-		task.Debug("task dispose listener begin", append(yargs, "listenerIndex", i, "listenerCount", len(task.afterDisposeListeners))...)
-		listener()
-		task.Debug("task dispose listener end", append(yargs, "listenerIndex", i, "listenerCount", len(task.afterDisposeListeners))...)
-	}
+	// 同 start()：灌进补跑队列后由排空循环跑掉，遍历期间到达的 OnDispose 由本
+	// goroutine（事件循环）接手。afterDisposeListeners 不清空，重试时要再跑一遍。
+	task.hookMu.Lock()
+	task.pendingDispose = append(task.pendingDispose, task.afterDisposeListeners...)
+	task.disposeHooksRun = true
+	task.catchingUpDispose = true
+	disposeGen := task.hookGen
+	task.hookMu.Unlock()
+	task.drainDisposeHooks(yargs, disposeGen)
 	task.SetDescription("disposeProcess", "done")
 	task.setState(TASK_STATE_DISPOSED)
 	task.shutdown.Fulfill(reason)
