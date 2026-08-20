@@ -139,6 +139,7 @@ type (
 		hookMu                                     sync.Mutex // 保护下面这组钩子字段，见 OnStart
 		hookGen                                    uint32     // 钩子代际，reset() 每轮 +1，见 drainStartHooks
 		startHooksRun, disposeHooksRun             bool       // 本轮的对应遍历是否已经走过
+		closeOnStopRun                             bool       // 本轮 stop() 是否已经排空过 closeOnStop，见 OnStop
 		catchingUpStart, catchingUpDispose         bool       // 是否已有 goroutine 在排空补跑队列
 		pendingStart, pendingDispose               []func()   // 错过本轮遍历、等待补跑的监听器
 		afterStartListeners, afterDisposeListeners []func()
@@ -289,23 +290,34 @@ func (task *Task) Stop(err error) {
 }
 
 func (task *Task) stop() {
-	task.WaitStarted() // wait for task to set closeOnStop
+	// 等不到 Start() 结束，这句只在"任务已经启动完"的情形下有意义：startup 是
+	// util.NewPromise(task.Context) 建的，Await() 等的是 ctx.Done()，而 Stop() 先
+	// CancelCauseFunc 再调 stop()，所以 Stop 与 Start 并发时它立即返回，下面取到的
+	// 是空切片。晚到的那些注册由 OnStop 自己就地关闭，见那里的注释。
+	task.WaitStarted()
 	// 锁内取走整份，锁外逐个处理。置 nil 而不是 [:0]：后者会把底层数组留给
 	// 后续 append 复用，而那次 append 就会覆盖我们正在遍历的元素。
 	task.hookMu.Lock()
 	closeOnStop := task.closeOnStop
 	task.closeOnStop = nil
+	task.closeOnStopRun = true
 	task.hookMu.Unlock()
 	task.Debug("task stop", "taskId", task.ID, "ownerType", task.GetOwnerType(), "closeOnStop", len(closeOnStop))
 	for _, resource := range closeOnStop {
-		switch v := resource.(type) {
-		case func():
-			v()
-		case func() error:
-			v()
-		case ITask:
-			v.Stop(task.StopReason())
-		}
+		task.closeResource(resource)
+	}
+}
+
+// closeResource 关闭一个 OnStop 资源。stop() 的批量排空与 OnStop 的就地补跑共用它，
+// 免得两处的类型分支各自漂移。
+func (task *Task) closeResource(resource any) {
+	switch v := resource.(type) {
+	case func():
+		v()
+	case func() error:
+		v()
+	case ITask:
+		v.Stop(task.StopReason())
 	}
 }
 
@@ -456,8 +468,19 @@ func (task *Task) OnStop(resource any) {
 		panic("onStop resource is task itself")
 	}
 	task.hookMu.Lock()
-	defer task.hookMu.Unlock()
+	if task.closeOnStopRun {
+		// 本轮 stop() 已经排空过 closeOnStop，此时再 append 就再也没人会遍历它：
+		// dispose() 里唯一的收尾是 stopOnce.Do(task.stop)，而那次 once 已被触发排空
+		// 的 Stop() 消费掉，退化成空操作；有下一轮重试才会晚一轮被带走，没有就永久
+		// 泄漏。典型形态是 Stop() 与 Start() 并发——资源在 Start() 里建好之后才注册，
+		// 注册时 stop() 早已跑完。这里就地关掉，动作与 stop() 遍历到它完全一致，
+		// 只是换了个 goroutine 执行。
+		task.hookMu.Unlock()
+		task.closeResource(resource)
+		return
+	}
 	task.closeOnStop = append(task.closeOnStop, resource)
+	task.hookMu.Unlock()
 }
 
 func (task *Task) GetSignal() any {
@@ -604,6 +627,9 @@ func (task *Task) reset() {
 	task.hookMu.Lock()
 	task.hookGen++
 	task.startHooksRun, task.disposeHooksRun = false, false
+	// closeOnStopRun 也复位：下一轮 Start() 注册的资源要重新攒进 closeOnStop，
+	// 由下一轮 stop() 排空，而不是一注册就被当成"晚到"立刻关掉。
+	task.closeOnStopRun = false
 	task.pendingStart, task.pendingDispose = nil, nil
 	task.hookMu.Unlock()
 	task.loopGen.Add(1)
