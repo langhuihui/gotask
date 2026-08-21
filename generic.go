@@ -47,7 +47,7 @@ func (fn AnyTaskFunc) Run(ctx context.Context) (any, error) {
 
 // Run executes a typed task runner.
 func Run[T any](ctx context.Context, task TaskRunner[T]) (T, error) {
-	return task.Run(ctx)
+	return runGeneric(ctx, task.Run)
 }
 
 // Then chains a downstream task that consumes the previous typed result.
@@ -255,10 +255,13 @@ func shouldRetryGeneric(err error, ctx context.Context, policy RetryPolicy, retr
 	if errors.Is(err, ErrTaskComplete) || errors.Is(err, ErrExit) || errors.Is(err, ErrStopByUser) || errors.Is(err, ErrTimeout) {
 		return false
 	}
+	if policy.MaxRetry >= 0 && retries >= policy.MaxRetry {
+		return false
+	}
 	if policy.ShouldRetry != nil {
 		return policy.ShouldRetry(err)
 	}
-	return policy.MaxRetry < 0 || retries < policy.MaxRetry
+	return true
 }
 
 func genericRetryDelay(retries int, policy RetryPolicy) time.Duration {
