@@ -212,6 +212,8 @@ root.Shutdown()
 
 GoTask now provides an additive generic orchestration layer for typed task pipelines without changing the existing `Task` / `Job` runtime APIs.
 
+Use `TaskFunc[T]` for function-style orchestration, or `Run(ctx, runner)` when you want to execute any `TaskRunner[T]` implementation through the same typed entry point.
+
 ```go
 source := task.TaskFunc[int](func(ctx context.Context) (int, error) {
     return 21, nil

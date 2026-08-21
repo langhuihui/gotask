@@ -212,6 +212,8 @@ root.Shutdown()
 
 GoTask 现在提供了增量式的泛型编排层，可在不改变现有 `Task` / `Job` 运行时 API 的前提下，为任务函数、组合器、并行收集器和策略装饰器提供强类型支持。
 
+函数式编排可直接使用 `TaskFunc[T]`；如果你封装了实现 `TaskRunner[T]` 的类型，可通过 `Run(ctx, runner)` 走同一套强类型执行入口。
+
 ```go
 source := task.TaskFunc[int](func(ctx context.Context) (int, error) {
     return 21, nil

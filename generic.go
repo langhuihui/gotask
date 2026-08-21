@@ -27,7 +27,11 @@ type Result[T any] struct {
 	Err   error
 }
 
-// RetryPolicy configures the generic retry decorator.
+// RetryPolicy configures the generic retry decorator. MaxRetry matches the
+// existing task retry semantics: 0 disables retries, positive values allow that
+// many retries after the initial attempt, and negative values retry without a
+// fixed limit. The first retry waits for RetryInterval, and each later retry
+// doubles the delay up to MaxRetryInterval.
 type RetryPolicy struct {
 	MaxRetry         int
 	RetryInterval    time.Duration
@@ -166,7 +170,7 @@ func WithRetry[T any](task TaskFunc[T], policy RetryPolicy) TaskFunc[T] {
 			if err == nil {
 				return value, nil
 			}
-			if !shouldRetryGeneric(err, ctx, policy, retries) {
+			if !shouldRetryGeneric(ctx, err, policy, retries) {
 				var zero T
 				return zero, err
 			}
@@ -184,7 +188,9 @@ func WithRetry[T any](task TaskFunc[T], policy RetryPolicy) TaskFunc[T] {
 }
 
 // WithTimeout wraps a typed task with a timeout. The wrapped task receives a
-// child context carrying ErrTimeout as its cancellation cause.
+// child context carrying ErrTimeout as its cancellation cause. Like other
+// context-based timeouts in Go, this stops waiting when the deadline expires
+// but cannot forcibly terminate a task that ignores context cancellation.
 func WithTimeout[T any](task TaskFunc[T], timeout time.Duration) TaskFunc[T] {
 	return func(ctx context.Context) (T, error) {
 		if timeout <= 0 {
@@ -200,14 +206,19 @@ func WithTimeout[T any](task TaskFunc[T], timeout time.Duration) TaskFunc[T] {
 		}()
 
 		select {
+		case result := <-resultCh:
+			return result.Value, result.Err
 		case <-derivedCtx.Done():
+			select {
+			case result := <-resultCh:
+				return result.Value, result.Err
+			default:
+			}
 			var zero T
 			if cause := context.Cause(derivedCtx); cause != nil {
 				return zero, cause
 			}
 			return zero, derivedCtx.Err()
-		case result := <-resultCh:
-			return result.Value, result.Err
 		}
 	}
 }
@@ -245,7 +256,7 @@ func runGeneric[T any](ctx context.Context, fn TaskFunc[T]) (value T, err error)
 	return fn(ctx)
 }
 
-func shouldRetryGeneric(err error, ctx context.Context, policy RetryPolicy, retries int) bool {
+func shouldRetryGeneric(ctx context.Context, err error, policy RetryPolicy, retries int) bool {
 	if err == nil {
 		return false
 	}
