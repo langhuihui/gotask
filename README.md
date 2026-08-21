@@ -208,6 +208,72 @@ root.AddTask(myTask)
 root.Shutdown()
 ```
 
+### Generic Orchestration APIs
+
+GoTask now provides an additive generic orchestration layer for typed task pipelines without changing the existing `Task` / `Job` runtime APIs.
+
+```go
+source := task.TaskFunc[int](func(ctx context.Context) (int, error) {
+    return 21, nil
+})
+
+pipeline := task.Then(source, func(ctx context.Context, value int) (string, error) {
+    return fmt.Sprintf("value:%d", value*2), nil
+})
+
+result, err := pipeline.Run(context.Background())
+```
+
+Typed parallel collection avoids `[]any` / `map[string]any` and downstream type assertions:
+
+```go
+values, err := task.Parallel(context.Background(),
+    func(context.Context) (int, error) { return 1, nil },
+    func(context.Context) (int, error) { return 2, nil },
+)
+
+named, err := task.ParallelMap(context.Background(), map[string]task.TaskFunc[int]{
+    "alpha": func(context.Context) (int, error) { return 1, nil },
+    "beta":  func(context.Context) (int, error) { return 2, nil },
+})
+```
+
+Retry and timeout decorators are also available in typed form:
+
+```go
+retried := task.WithRetry(source, task.RetryPolicy{
+    MaxRetry:      3,
+    RetryInterval: time.Second,
+})
+
+timed := task.WithTimeout(retried, 2*time.Second)
+```
+
+#### Compatibility and deprecation plan
+
+- Existing `Task`, `Job`, `RootManager`, channel-task, retry, and lifecycle APIs remain available unchanged.
+- The generic APIs are additive and can be adopted incrementally in orchestration code that previously used `any`-style helpers.
+- `AnyTaskFunc`, `AdaptAnyTaskFunc`, and `AsAnyTaskFunc` are provided as transition helpers and marked deprecated.
+- No breaking changes are required in this PR; existing task-tree code keeps working as-is.
+
+#### Migration example
+
+Before:
+
+```go
+legacy := task.AnyTaskFunc(func(ctx context.Context) (any, error) {
+    return 21, nil
+})
+```
+
+After:
+
+```go
+typed := task.TaskFunc[int](func(ctx context.Context) (int, error) {
+    return 21, nil
+})
+```
+
 ### Dashboard
 
 Start the built-in dashboard to visually monitor tasks:

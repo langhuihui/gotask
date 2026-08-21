@@ -208,6 +208,72 @@ root.AddTask(myTask)
 root.Shutdown()
 ```
 
+### 泛型编排 API
+
+GoTask 现在提供了增量式的泛型编排层，可在不改变现有 `Task` / `Job` 运行时 API 的前提下，为任务函数、组合器、并行收集器和策略装饰器提供强类型支持。
+
+```go
+source := task.TaskFunc[int](func(ctx context.Context) (int, error) {
+    return 21, nil
+})
+
+pipeline := task.Then(source, func(ctx context.Context, value int) (string, error) {
+    return fmt.Sprintf("value:%d", value*2), nil
+})
+
+result, err := pipeline.Run(context.Background())
+```
+
+并行结果聚合可直接返回强类型切片 / Map，避免 `[]any` / `map[string]any` 和后续类型断言：
+
+```go
+values, err := task.Parallel(context.Background(),
+    func(context.Context) (int, error) { return 1, nil },
+    func(context.Context) (int, error) { return 2, nil },
+)
+
+named, err := task.ParallelMap(context.Background(), map[string]task.TaskFunc[int]{
+    "alpha": func(context.Context) (int, error) { return 1, nil },
+    "beta":  func(context.Context) (int, error) { return 2, nil },
+})
+```
+
+泛型重试与超时装饰器：
+
+```go
+retried := task.WithRetry(source, task.RetryPolicy{
+    MaxRetry:      3,
+    RetryInterval: time.Second,
+})
+
+timed := task.WithTimeout(retried, 2*time.Second)
+```
+
+#### 兼容策略与弃用计划
+
+- 现有 `Task`、`Job`、`RootManager`、通道任务、重试和生命周期 API 保持不变。
+- 新增泛型 API 为增量能力，可逐步替换编排代码中原有的 `any` 风格辅助逻辑。
+- `AnyTaskFunc`、`AdaptAnyTaskFunc`、`AsAnyTaskFunc` 作为过渡适配层保留，并标记为 deprecated。
+- 本次 PR 不引入 breaking change，现有任务树代码可继续按原方式运行。
+
+#### 迁移示例
+
+改造前：
+
+```go
+legacy := task.AnyTaskFunc(func(ctx context.Context) (any, error) {
+    return 21, nil
+})
+```
+
+改造后：
+
+```go
+typed := task.TaskFunc[int](func(ctx context.Context) (int, error) {
+    return 21, nil
+})
+```
+
 ### 管理面板
 
 启动内置的管理面板来可视化监控任务：
