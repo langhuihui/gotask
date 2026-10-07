@@ -206,7 +206,14 @@ func (task *Task) GetOwnerType() string {
 	if ownerType, ok := task.description.Load(OwnerTypeKey); ok {
 		return ownerType.(string)
 	}
-	return strings.TrimSuffix(reflect.TypeOf(task.handler).Elem().Name(), "Task")
+	if task.handler == nil {
+		return "Task"
+	}
+	handlerType := reflect.TypeOf(task.handler)
+	if handlerType.Kind() == reflect.Pointer {
+		handlerType = handlerType.Elem()
+	}
+	return strings.TrimSuffix(handlerType.Name(), "Task")
 }
 
 func (*Task) GetTaskType() TaskType {
