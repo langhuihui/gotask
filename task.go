@@ -128,8 +128,14 @@ type (
 	Description    = map[string]any
 	TaskContextKey string
 	Task           struct {
-		ID          uint32
-		StartTime   time.Time
+		ID        uint32
+		StartTime time.Time
+		// startNano 是 StartTime.UnixNano() 的原子快照。StartTime 本身是公开
+		// 字段、写在事件循环（或 RunTask 的调用方）goroutine 上，而 Stop() 会在
+		// 任意 goroutine 上经 Debug 变参读它算 elapsed——裸字段跨 goroutine 读写
+		// 就是数据竞争（Test_Block 实测）。Debug 改读快照；StartTime 保留原类型，
+		// 同 goroutine 的 checkRetry 继续直接读它。
+		startNano   atomic.Int64
 		StartReason string
 		Logger      *slog.Logger
 		context.Context
@@ -145,7 +151,9 @@ type (
 		afterStartListeners, afterDisposeListeners []func()
 		closeOnStop                                []any
 		resources                                  []any
-		stopOnce                                   sync.Once
+		stopMu                                     sync.Mutex // 保护 stopped/stopErr，见 Stop
+		stopped                                    bool       // 本任务是否已被请求停止（含 InitContext 之前的提前 Stop）
+		stopErr                                    error      // stopped 时记录停止原因，供 InitContext 补取消 context
 		description                                sync.Map
 		startup, shutdown                          *util.Promise
 		parent                                     *Job
@@ -277,23 +285,51 @@ func (task *Task) StopReasonIs(errs ...error) bool {
 	return false
 }
 
+// Stop 请求停止任务。幂等：只有第一次调用执行取消 context 与 stop() 排空，
+// 后续调用直接返回——与旧实现 stopOnce.Do 的语义一致。
+//
+// 为什么用 stopMu + stopped 而不是 sync.Once：Once.Do 有快速路径
+// （done.Load()==1 时直接返回，完全不碰互斥量）。Go 任务的 goroutine 在
+// defer 里调 Stop()，其 Once 的 f 返回后、m.Unlock() 执行前有一个窗口；
+// 事件循环的 dispose() 走 Once.Do 快速路径旁路了互斥量，随后的 reset()
+// 又会整体覆写 stopOnce 字段——与那个尚未执行的 m.Unlock() 构成无序竞争
+// （race detector 实测：reset 的 8 字节结构体写 vs goroutine 的 sema 写）。
+// 改用显式互斥量后，dispose()/reset() 都必须拿锁，永远排在在途 Stop 临界区
+// 之后，整个竞争类随之消失。
+//
+// CancelCauseFunc 为 nil 说明任务还没有 context（尚未 AddTask/InitContext）。
+// 此时不能静默吞掉这次停止：记住 stopped 与 stopErr，InitContext 建好
+// context 后立即补上取消，否则任务会带着一个永不取消的新 context 跑完
+// 整个生命周期（Test_Hooks 曾因此永久挂住）。
+//
+// 整个函数体（含 nil 检查的 Error 日志与 Debug 日志）都在 stopMu 下：这些
+// 日志的参数是**饥饿求值**的，会读 ID/handler/parent/startup/startNano 等
+// 字段，而它们的写入端（initContext/reset/start）与 Stop 并发执行——不拿同
+// 一把锁，race detector 就会报读写竞争（Test_Block 的定时器 goroutine 与
+// AddTask 曾实测）。StartTime 是唯一的例外：它写在事件循环上，改成原子
+// 快照 startNano 供这里读取，见字段注释。
 func (task *Task) Stop(err error) {
+	_, file, line, _ := runtime.Caller(1)
+	task.stopMu.Lock()
+	defer task.stopMu.Unlock()
 	if err == nil {
 		task.Error("task stop with nil error", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType(), "parent", task.GetParent().GetOwnerType())
 		panic("task stop with nil error")
 	}
-	_, file, line, _ := runtime.Caller(1)
-	task.stopOnce.Do(func() {
-		if task.CancelCauseFunc != nil {
-			msg := "task cancel context"
-			if task.startup != nil && task.startup.IsRejected() {
-				msg = "task start failed"
-			}
-			task.Debug(msg, "caller", fmt.Sprintf("%s:%d", strings.TrimPrefix(file, sourceFilePathPrefix), line), "reason", err, "elapsed", time.Since(task.StartTime), "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
-			task.CancelCauseFunc(err)
+	if task.stopped {
+		return
+	}
+	task.stopped = true
+	task.stopErr = err
+	if task.CancelCauseFunc != nil {
+		msg := "task cancel context"
+		if task.startup != nil && task.startup.IsRejected() {
+			msg = "task start failed"
 		}
-		task.stop()
-	})
+		task.Debug(msg, "caller", fmt.Sprintf("%s:%d", strings.TrimPrefix(file, sourceFilePathPrefix), line), "reason", err, "elapsed", time.Since(time.Unix(0, task.startNano.Load())), "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
+		task.CancelCauseFunc(err)
+	}
+	task.stop()
 }
 
 func (task *Task) stop() {
@@ -530,16 +566,17 @@ func (task *Task) checkRetry(err error) bool {
 
 		task.SetDescription("retryDelay", retryDelay.String())
 		if delta := time.Since(task.StartTime); delta < retryDelay {
-			time.Sleep(retryDelay - delta)
+			timer := time.NewTimer(retryDelay - delta)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-task.parent.Done():
+				return false
+			}
 		}
-		// Re-check parent after sleep: parent may have been stopped while we were sleeping.
-		// Without this check a stale retry would proceed with a cancelled context and could
-		// call Publish() again, potentially kicking out a legitimate publisher that was
-		// created by a replacement PullJob added during the sleep window.
-		// if task.parent.IsStopped() {
-		// 	task.Warn("parent stopped after retry sleep, abort retry", "taskId", task.ID, "ownerType", task.GetOwnerType())
-		// 	return false
-		// }
+		if task.parent.IsStopped() {
+			return false
+		}
 		return true
 	} else {
 		if task.retry.MaxRetry > 0 {
@@ -561,13 +598,16 @@ func (task *Task) start() bool {
 		}()
 	}
 	for {
+		err = nil
 		// Guard against a race window: parent/task may be stopped right after
 		// checkRetry returns true and before the next retry Start() call.
 		//if task.IsStopped() || (task.parent != nil && task.parent.IsStopped()) {
 		//	task.Warn("fix-B: task/parent stopped at retry loop entry, abort retry", "taskId", task.ID, "ownerType", task.GetOwnerType())
 		//	return false
 		//}
-		task.StartTime = time.Now()
+		now := time.Now()
+		task.StartTime = now
+		task.startNano.Store(now.UnixNano())
 		task.Debug("task start", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType(), "reason", task.StartReason)
 		task.setState(TASK_STATE_STARTING)
 		if v, ok := task.handler.(TaskStarter); ok {
@@ -589,7 +629,6 @@ func (task *Task) start() bool {
 			if task.IsStopped() {
 				err = task.StopReason()
 			} else {
-				task.ResetRetryCount()
 				if runHandler, ok := task.handler.(TaskBlock); ok {
 					task.setState(TASK_STATE_RUNNING)
 					task.Debug("task run", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
@@ -608,6 +647,10 @@ func (task *Task) start() bool {
 			}
 			return true
 		} else {
+			// 显式落定 startup：出生即被停止的任务其 promise 挂在 Background 上
+			// （见 InitContext），等不到 context 取消来代劳；其余任务这里与 Stop
+			// 内的取消竞争同一个 promise，先到者胜，落定的值相同。
+			task.startup.Reject(err)
 			task.Stop(err)
 			if task.parent != nil {
 				task.parent.onChildDispose(task.handler)
@@ -640,10 +683,22 @@ func (task *Task) reset() {
 	task.pendingStart, task.pendingDispose = nil, nil
 	task.hookMu.Unlock()
 	task.loopGen.Add(1)
-	task.stopOnce = sync.Once{}
+	// stopped 也必须在锁内清除：上一轮可能还有一个来自任务 goroutine 的
+	// Stop() 临界区没走完（其 defer 停在 Once 时代的 done.Store 与 Unlock
+	// 之间，今天则是 stopMu 的临界区尾部），不拿锁就复位的标志会与那个在途
+	// 临界区再次抢同一个任务。详见 Stop 的注释。
+	//
+	// Context/CancelCauseFunc/shutdown/startup 的重建同样必须在锁内：它们是
+	// Stop() 在 stopMu 下会经 Debug 变参饥饿求值读到的字段（startNano 之外，
+	// 这四个都是裸字段），写入端不拿同一把锁就是数据竞争。这里没有用户代码，
+	// 持锁时间只有字段赋值与两次 NewPromise。
+	task.stopMu.Lock()
+	task.stopped = false
+	task.stopErr = nil
 	task.Context, task.CancelCauseFunc = context.WithCancelCause(task.parentCtx)
 	task.shutdown = util.NewPromise(context.Background())
 	task.startup = util.NewPromise(task.Context)
+	task.stopMu.Unlock()
 }
 
 func (task *Task) GetDescriptions() map[string]string {
@@ -709,7 +764,16 @@ func (task *Task) dispose() {
 	resourceCount := len(task.resources)
 	task.hookMu.Unlock()
 	task.Debug("task dispose resources begin", append(yargs, "resourceCount", resourceCount)...)
-	task.stopOnce.Do(task.stop)
+	// 与 Stop() 共用 stopMu/stopped：Stop 从未执行过时（例如停止来自父级
+	// context 的级联取消，本任务自己的 Stop 未被调用过）这里负责补一次
+	// stop() 排空；已经 Stop 过则跳过。Once 版本靠 done 标志做同样的判断，
+	// 但它的快速路径会旁路互斥量，与 reset() 的结构体写竞争（见 Stop 注释）。
+	task.stopMu.Lock()
+	if !task.stopped {
+		task.stopped = true
+		task.stop()
+	}
+	task.stopMu.Unlock()
 	// 快照**必须取在 stop() 之后**：原来的 `for range task.resources` 是在
 	// stop() 返回之后才求值 range 表达式的，而 stop() 会跑 closeOnStop 回调，
 	// 那些回调可能再 Using() 新资源。把取快照提到 stop() 之前会把它们漏掉——
@@ -813,15 +877,17 @@ func (task *Task) TraceEnabled() bool {
 
 func (task *Task) RunTask(t ITask, opt ...any) (err error) {
 	tt := t.GetTask()
-	tt.handler = t
 	mt := task.parent
 	if job, ok := task.handler.(IJob); ok {
 		mt = job.getJob()
 	}
-	mt.initContext(tt, opt...)
+	// handler 的赋值已内嵌到 initContext（锁内）：原先在锁外写它，与 Stop()
+	// 的 Debug 变参饥饿求值读取竞争（GetOwnerType 会解引用 handler）。
+	mt.initContext(tt, t, opt...)
 	if mt.IsStopped() {
 		err = mt.StopReason()
-		task.startup.Reject(err)
+		tt.startup.Reject(err)
+		tt.CancelCauseFunc(err)
 		return
 	}
 	task.OnStop(t)

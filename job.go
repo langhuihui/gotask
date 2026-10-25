@@ -72,9 +72,17 @@ func (mt *Job) SetEventLoopBufferSize(size int) {
 }
 
 func (mt *Job) waitChildStopped(child ITask) error {
+	// 等的必须是子任务的 shutdown——dispose 整个跑完（含 OnDispose 钩子）之后
+	// 才落定的那个 promise。不能图省事用 child.WaitStopped()：它开头的
+	// WaitStarted() 在 startup 被 Reject 时带着错误提前返回，根本不等 dispose。
+	// 子任务的 start 失败路径是先 Reject startup、再跑 dispose 的，父任务从
+	// 这里提前返回，自己的 OnDispose 就会与子任务的 dispose 并发甚至抢先执行，
+	// 打破"子任务先于父任务销毁"的约定（Test_ParentStop 实测父钩子跑到了子钩子
+	// 前面）。startup 正常落定的任务两条路等价（都要等 shutdown），受影响的只有
+	// 被拒绝的那一类。
 	done := make(chan error, 1)
 	go func() {
-		done <- child.WaitStopped()
+		done <- child.GetTask().shutdown.Await()
 	}()
 
 	ticker := time.NewTicker(30 * time.Second)
@@ -197,8 +205,7 @@ func (mt *Job) onChildStart(child ITask) {
 
 func (mt *Job) RangeSubTask(callback func(task ITask) bool) {
 	mt.children.Range(func(key, value any) bool {
-		callback(value.(ITask))
-		return true
+		return callback(value.(ITask))
 	})
 }
 
@@ -208,7 +215,21 @@ func (mt *Job) AddDependTask(t ITask, opt ...any) (task *Task) {
 	return mt.AddTask(t, opt...)
 }
 
-func (mt *Job) initContext(task *Task, opt ...any) {
+// initContext 为一个新入队（或重入队）的任务补齐全部按任务初始化的字段。
+//
+// 整个函数体在 task.stopMu 保护下执行：这些字段（Context/CancelCauseFunc/
+// startup/shutdown/handler/ID/Logger……）会被任意 goroutine 的 Stop() 经
+// Debug 变参饥饿求值读到（Test_TaskStateRace 的注释预警过这类读取），而
+// Stop() 自己持 stopMu——写入端不拿同一把锁，那些读取就是数据竞争
+// （Test_Block 的定时器 goroutine 与 AddTask 曾实测竞争 startup 及其
+// promise 内部）。本函数内没有用户代码（getKey 由调用方在锁外调用），
+// 持锁时间只有字段赋值与 NewPromise。
+//
+// handler 也在这里赋值：调用方（AddTask/RunTask）原先在锁外写它，同样
+// 与 Stop() 的 Debug 读取竞争。
+func (mt *Job) initContext(task *Task, handler ITask, opt ...any) {
+	task.stopMu.Lock()
+	defer task.stopMu.Unlock()
 	callDepth := 2
 	for _, o := range opt {
 		switch v := o.(type) {
@@ -228,6 +249,7 @@ func (mt *Job) initContext(task *Task, opt ...any) {
 	if ok {
 		task.StartReason = fmt.Sprintf("%s:%d", strings.TrimPrefix(file, sourceFilePathPrefix), line)
 	}
+	task.handler = handler
 	task.parent = mt
 	if task.parentCtx == nil {
 		task.parentCtx = mt.Context
@@ -237,7 +259,21 @@ func (mt *Job) initContext(task *Task, opt ...any) {
 		task.ID = GetNextTaskID()
 	}
 	task.Context, task.CancelCauseFunc = context.WithCancelCause(task.parentCtx)
-	task.startup = util.NewPromise(task.Context)
+	// Stop() 可能在 AddTask 之前就被调用（那时 CancelCauseFunc 还是 nil，
+	// 停止请求只被记住）。这里补上取消，让新 context 出生即已停止；否则
+	// start() 会把任务当正常任务跑完整个生命周期，且它的信号通道永远不会
+	// 关闭，事件循环与 WaitStopped 一起永久挂住。
+	startupCtx := task.Context
+	if task.stopped {
+		task.CancelCauseFunc(task.stopErr)
+		// context 已出生即取消，startup promise 不能再挂在它上面：promise
+		// 的 Fulfill 走 CancelCauseFunc，对已取消的父 context 是空操作，
+		// WaitStarted 会立刻返回停止原因，WaitStopped 随之跳过 shutdown
+		// 等待——而 OnStart/OnDispose 钩子还没来得及跑（它们由事件循环
+		// 后续执行），调用方却已经拿到返回值。Test_Hooks 正是这条路径。
+		startupCtx = context.Background()
+	}
+	task.startup = util.NewPromise(startupCtx)
 	task.shutdown = util.NewPromise(context.Background())
 	if task.Logger == nil {
 		task.Logger = mt.Logger
@@ -246,8 +282,7 @@ func (mt *Job) initContext(task *Task, opt ...any) {
 
 func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 	task = t.GetTask()
-	task.handler = t
-	mt.initContext(task, opt...)
+	mt.initContext(task, t, opt...)
 	if mt.IsStopped() {
 		mt.Warn("[fix1] AddTask rejected: parent already stopped", "key", t.getKey(), "newId", task.ID, "reason", mt.StopReason())
 		task.startup.Reject(mt.StopReason())
@@ -293,6 +328,13 @@ func (mt *Job) AddTask(t ITask, opt ...any) (task *Task) {
 		}
 	}()
 	if err = mt.eventLoop.add(mt, t); err != nil {
+		// add 失败意味着任务永远不会进入事件循环：dispose 不会跑，shutdown
+		// 没有别的落定机会。父任务销毁时 waitChildStopped 等的就是 shutdown
+		// （见那里），不落定就是永久挂起。这里补上——任务虽没跑起来，生命
+		// 周期却已经终结，两个 promise 都必须兑现。（startup 由下面的 defer
+		// 落定；post-add 的 IsStopped 分支不归这里管——消息已在通道里，循环
+		// 最终会处理它并跑 dispose，由 dispose 落定 shutdown。）
+		task.shutdown.Fulfill(err)
 		return
 	}
 	if mt.IsStopped() {
@@ -315,12 +357,16 @@ func (mt *Job) Call(callback func()) {
 		return
 	}
 	ctx, cancel := context.WithCancel(mt)
-	_ = mt.eventLoop.add(mt, func() {
+	defer cancel()
+	if err := mt.eventLoop.add(mt, func() {
 		startTime := time.Now()
 		mt.Debug("call", "caller", caller)
+		defer cancel()
 		callback()
 		mt.Debug("call done", "caller", caller, "elapsed", time.Since(startTime))
+	}); err != nil {
+		mt.Warn("call rejected", "caller", caller, "reason", err)
 		cancel()
-	})
+	}
 	<-ctx.Done()
 }

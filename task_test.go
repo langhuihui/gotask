@@ -82,14 +82,25 @@ func Test_ParentStop(t *testing.T) {
 			t.Errorf("expected %d, got %d", expected, count)
 		}
 	}
+	// 必须等两个 OnDispose 钩子都执行完再收尾：父任务的 dispose 排在子任务之后
+	// （Job.dispose 先 waitChildrenDispose），只等子任务的 WaitStopped 会在父
+	// 钩子执行前就返回，钩子里的 t.Errorf 随后落到已完成的测试上，直接 panic
+	// （"Fail in goroutine after Test_ParentStop has completed"）。也不能改等
+	// parent.WaitStopped()：父任务 start 走错误路径时 startup 被 Reject，
+	// WaitStopped 开头的 WaitStarted 会带着停止原因提前返回，同样等不到 dispose。
+	disposed := make(chan struct{}, 2)
 	task.OnDispose(func() {
 		checkCalled(1)
+		disposed <- struct{}{}
 	})
 	parent.OnDispose(func() {
 		checkCalled(2)
+		disposed <- struct{}{}
 	})
 	parent.AddTask(&task)
 	parent.Stop(ErrAutoStop)
+	<-disposed
+	<-disposed
 	if !errors.Is(task.WaitStopped(), ErrAutoStop) {
 		t.Errorf("expected task auto stop")
 	}
@@ -120,6 +131,16 @@ func Test_ParentAutoStop(t *testing.T) {
 	}
 }
 
+// Test_Hooks 验证钩子的注册顺序语义：两对 OnStart/OnDispose 按注册顺序
+// 执行，且 OnStart 全部先于 OnDispose。
+//
+// 历史：本测试原本写作"先 task.Stop 再 AddTask"，指望提前停止也被记住、
+// 任务仍跑完整个生命周期。那个语义从未存在——旧实现把提前 Stop 整个吞掉
+// （stopOnce 被消费时 context 尚未建立），任务带着永不关闭的新 context 正常
+// 启动、跑完钩子后永久挂住，测试以 10 分钟超时收场。现已修复挂起（见
+// Test_StopBeforeAddTask），但"已停止的任务不跑 OnStart 钩子"是框架自始至终
+// 的 deliberate 语义（drainStartHooks 的 IsStopped 护栏，PR #6 明确保留），
+// 因此这里改用正常启动后停止的场景来验证钩子顺序本身。
 func Test_Hooks(t *testing.T) {
 	var called atomic.Uint32
 	var task Task
@@ -140,8 +161,41 @@ func Test_Hooks(t *testing.T) {
 	task.OnDispose(func() {
 		checkCalled(4)
 	})
+	root.AddTask(&task)
+	time.AfterFunc(time.Second, func() {
+		task.Stop(ErrTaskComplete)
+	})
+	if err := task.WaitStopped(); !errors.Is(err, ErrTaskComplete) {
+		t.Errorf("expected ErrTaskComplete, got %v", err)
+	}
+}
+
+// Test_StopBeforeAddTask 覆盖"先 Stop 再 AddTask"的挂起缺陷。
+//
+// 旧实现用 stopOnce.Do 承载停止：AddTask 之前 CancelCauseFunc 还是 nil，
+// 这一次 Stop 把 once 消费掉却没有取消任何 context；随后 InitContext 建一个
+// 全新的、永不取消的 context，任务被当成正常任务跑完整个生命周期，信号通道
+// 永不关闭——WaitStopped 与事件循环一起永久挂住。
+//
+// 修复后停止请求被记住，InitContext 建好 context 立即补上取消。锁定语义：
+// OnStart 钩子不跑（已停止的任务不执行启动钩子，drainStartHooks 护栏），
+// OnDispose 钩子照常执行，WaitStopped 返回停止原因。
+func Test_StopBeforeAddTask(t *testing.T) {
+	var task Task
+	var onStartRan, onDisposeRan atomic.Bool
+	task.OnStart(func() { onStartRan.Store(true) })
+	task.OnDispose(func() { onDisposeRan.Store(true) })
 	task.Stop(ErrTaskComplete)
-	root.AddTask(&task).WaitStopped()
+	root.AddTask(&task)
+	if err := task.WaitStopped(); !errors.Is(err, ErrTaskComplete) {
+		t.Fatalf("expected ErrTaskComplete, got %v", err)
+	}
+	if onStartRan.Load() {
+		t.Error("OnStart hook must not run for a task stopped before it starts")
+	}
+	if !onDisposeRan.Load() {
+		t.Error("OnDispose hook must run so the task is fully torn down")
+	}
 }
 
 type startFailTask struct {

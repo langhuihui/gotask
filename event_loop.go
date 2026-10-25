@@ -2,6 +2,7 @@ package task
 
 import (
 	"errors"
+	"fmt"
 	"reflect"
 	"runtime/debug"
 	"sync"
@@ -104,17 +105,35 @@ func (e *EventLoop) add(mt *Job, sub any) (err error) {
 	}
 }
 
+// initCases 初始化（或重建）本轮的 select case 集合：第 0 个固定为输入通道，
+// 其余为每个在册子任务的信号通道。
+//
+// 重建不是可选优化：上一轮 run() 可能异常退出（用户代码 panic 被 recover 后
+// 整个 run() 被 unwind），此时 e.children 里仍有子任务。若不按 e.children
+// 重建，重启的循环只剩输入通道一个 case，那些子任务的完成/停止信号永远没有
+// case 接收——子任务得不到 dispose，等待它们的 waitChildStopped 永久挂起，
+// 父循环被拖死，后续一切级联超时（TestEventLoopRecoversStringPanic 触发过
+// 这条路径：Call 回调里 panic，job 的事件循环死亡，重启后丢了子任务 case）。
+func (e *EventLoop) initCases(ch chan any) {
+	cases := make([]reflect.SelectCase, 0, len(e.children)+1)
+	cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)})
+	for _, child := range e.children {
+		cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(child.GetSignal())})
+	}
+	e.cases = cases
+}
+
 func (e *EventLoop) run(mt *Job) {
 	mt.Debug("event loop start", "jobId", mt.GetTaskID(), "type", mt.GetOwnerType())
 	myGen := mt.loopGen.Load()
 	ch := e.getInput()
-	e.cases = []reflect.SelectCase{{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ch)}}
+	e.initCases(ch)
 	defer func() {
 		err := recover()
 		if err != nil {
 			mt.Error("job panic", "err", err, "stack", string(debug.Stack()))
 			if !ThrowPanic {
-				mt.Stop(errors.Join(err.(error), ErrPanic))
+				mt.Stop(errors.Join(fmt.Errorf("%v", err), ErrPanic))
 			} else {
 				panic(err)
 			}
@@ -158,7 +177,14 @@ func (e *EventLoop) run(mt *Job) {
 			case ITask:
 				if len(e.cases) >= 65535 {
 					mt.Warn("task children too many, may cause performance issue", "count", len(e.cases), "taskId", mt.GetTaskID(), "taskType", mt.GetTaskType(), "ownerType", mt.GetOwnerType())
+					// 停止之外还必须走一遍销毁：仅 Stop 的话 shutdown 永不落定
+					// （父任务销毁时 waitChildStopped 等它，永久挂起），任务也会
+					// 一直留在 children 里把 Size 撑住，循环永远等不到 children
+					// 清空。dispose 对未启动任务走的是提前返回分支，只落定
+					// shutdown、不跑钩子，代价可以忽略。
 					v.Stop(ErrTooManyChildren)
+					mt.onChildDispose(v)
+					mt.removeChild(v)
 					continue
 				}
 				if mt.blocked = v; v.start() {
