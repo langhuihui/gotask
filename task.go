@@ -632,10 +632,22 @@ func (task *Task) start() bool {
 				if runHandler, ok := task.handler.(TaskBlock); ok {
 					task.setState(TASK_STATE_RUNNING)
 					task.Debug("task run", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
-					err = runHandler.Run()
-					if err == nil {
-						err = ErrTaskComplete
-					}
+					// Phase 2（控制与执行分离，见 docs/重构-执行模型v2-Phase2设计.md）：
+					// Run 移出父 Job 事件循环。执行 goroutine 与 TaskGo 完全同构
+					// （task.run：panic 恢复 + 返回即 Stop），完成/失败经 context
+					// 取消汇入子任务信号，由事件循环的信号分支驱动 dispose 与重试；
+					// start() 就此返回 true，父循环继续处理 Call、兄弟任务与其他
+					// 子任务信号。契约：TestContract_RunDoesNotOccupyParentEventLoop、
+					// TestContract_StopDuringBlockingRunIsPrompt。
+					//
+					// 旧实现在这里内联执行 Run：长 Run 堵住整个父循环，且失败重试
+					// 序列（dispose→退避→reset→再 start）也全部占着循环；运行中的
+					// 子任务还不在 e.children 里，循环与 initCases 的重启重建都看不
+					// 见它。另一个顺带修复的缺陷：Run panic 被本函数的 defer 恢复后，
+					// 下面的错误路径整个被展开跳过，任务既不 Stop 也不 dispose
+					// （WaitStopped 永久挂起，见 TestContract_RunPanicRecoveredAndRetried）。
+					go task.run(runHandler.Run)
+					return true
 				}
 			}
 		}
@@ -891,10 +903,25 @@ func (task *Task) RunTask(t ITask, opt ...any) (err error) {
 		return
 	}
 	task.OnStop(t)
-	started := tt.start()
-	<-tt.Done()
-	if started {
-		tt.dispose()
+	if !tt.start() {
+		// start 内部已走完销毁（Start 失败或无重试余地），与 Phase 2 前一致。
+		return tt.StopReason()
 	}
-	return tt.StopReason()
+	// Phase 2（控制与执行分离）：start() 对 TaskBlock 只负责拉起执行 goroutine
+	// 并立即返回，完成、失败与重试的驱动职责移交给调用方——事件循环的信号分支
+	// 是同款协议（onChildDispose → checkRetry → reset → start），这里在调用方
+	// goroutine 上复刻它。<-tt.Done() 每轮读当前 context：reset() 换了新
+	// context，自然等到新 attempt 的信号。契约：TestContract_RunTaskDrives-
+	// RetryForBlockTask。
+	for {
+		<-tt.Done()
+		tt.dispose()
+		if !tt.checkRetry(tt.StopReason()) {
+			return tt.StopReason()
+		}
+		tt.reset()
+		if !tt.start() {
+			return tt.StopReason()
+		}
+	}
 }
