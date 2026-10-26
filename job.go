@@ -275,6 +275,15 @@ func (mt *Job) initContext(task *Task, handler ITask, opt ...any) {
 	}
 	task.startup = util.NewPromise(startupCtx)
 	task.shutdown = util.NewPromise(context.Background())
+	// 退避握手通道随生命周期重建：任务对象可能被重新 AddTask（initContext 再跑
+	// 一次），上一轮的等待者、令牌与退出信号必须一并作废，见 armRetry/reset。
+	if task.retryCancel != nil {
+		close(task.retryCancel)
+		task.retryCancel = nil
+	}
+	task.retrying.Store(false)
+	task.retryCh = make(chan struct{}, 1)
+	task.attemptDone = nil
 	if task.Logger == nil {
 		task.Logger = mt.Logger
 	}

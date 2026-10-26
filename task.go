@@ -124,6 +124,11 @@ type (
 		RetryCount       int
 		RetryInterval    time.Duration // Base interval for exponential backoff
 		MaxRetryInterval time.Duration // Maximum interval (0 means no limit)
+		// ShouldRetry is an optional predicate consulted on every failed attempt
+		// before spending a retry slot (nil means "decide by the default rules").
+		// It mirrors generic.RetryPolicy.ShouldRetry so both retry implementations
+		// agree on what "worth retrying" means (Phase 3 design §3.2).
+		ShouldRetry func(error) bool
 	}
 	Description    = map[string]any
 	TaskContextKey string
@@ -142,6 +147,27 @@ type (
 		context.CancelCauseFunc
 		handler                                    ITask
 		retry                                      RetryConfig
+		// retrying 表示本任务正处于「重试退避等待」中。此时 GetSignal() 返回
+		// retryCh 而不是 Done()：事件循环把这个子任务的信号 case 绑到退避定时器
+		// 上，而不是绑到已经结束（Done 已关闭）的本轮 context。见 armRetry。
+		retrying atomic.Bool
+		// retryCh 是退避到期的握手通道（容量 1）：定时器投递令牌，循环收到后
+		// 执行 reset + start。每次 initContext/reset 重建，旧周期的令牌随之作废。
+		retryCh chan struct{}
+		// retryCancel 关闭即取消在途退避等待（cancelRetryLocked），受 stopMu 保护。
+		retryCancel chan struct{}
+		// attemptDone 是**本轮执行 goroutine** 的退出信号，由 start() 在拉起
+		// goroutine 前创建、由 task.run 在 handler 返回后关闭。
+		//
+		// 重试必须先等它：reset() 会替换 task.Context，而上一轮的 handler 可能
+		// 还在返回路上读它（race detector 实测 reset 写 vs Run 读 StopReason）。
+		// 等它同时保证了不会出现「上一轮 handler 还在跑、下一轮已经起来」的并发
+		// 执行——重试的语义本来就是「上一轮结束之后再来一轮」。
+		attemptDone chan struct{}
+		// attemptGen 是执行代际：reset() 每开一轮 +1。task.run 的 defer 拿启动时
+		// 的代际来判定「我这一轮还是不是当前轮」，避免迟到的 Stop 取消下一轮的
+		// context（见 stopIfCurrentAttempt）。
+		attemptGen atomic.Uint32
 		hookMu                                     sync.Mutex // 保护下面这组钩子字段，见 OnStart
 		hookGen                                    uint32     // 钩子代际，reset() 每轮 +1，见 drainStartHooks
 		startHooksRun, disposeHooksRun             bool       // 本轮的对应遍历是否已经走过
@@ -204,6 +230,17 @@ func (task *Task) SetRetry(maxRetry int, retryInterval time.Duration) {
 // If set to 0, there is no maximum limit (default behavior)
 func (task *Task) SetMaxRetryInterval(maxRetryInterval time.Duration) {
 	task.retry.MaxRetryInterval = maxRetryInterval
+}
+
+// SetShouldRetry installs a predicate consulted on every failed attempt. It runs
+// after the built-in "terminal stop reason" filter and before a retry slot is
+// spent: returning false means this error is not worth retrying, no matter how
+// much budget is left. nil restores the default rules.
+//
+// Mirrors generic.RetryPolicy.ShouldRetry so the task tree and the generic
+// orchestration layer finally agree on retry semantics (Phase 3 design §3.2).
+func (task *Task) SetShouldRetry(shouldRetry func(error) bool) {
+	task.retry.ShouldRetry = shouldRetry
 }
 
 func (task *Task) GetTaskID() uint32 {
@@ -312,10 +349,37 @@ func (task *Task) Stop(err error) {
 	_, file, line, _ := runtime.Caller(1)
 	task.stopMu.Lock()
 	defer task.stopMu.Unlock()
+	task.stopLocked(err, file, line)
+}
+
+// stopIfCurrentAttempt 是本轮执行 goroutine 专用的 Stop：只有当前代际仍是它启动
+// 的那一轮时才真正停止。
+//
+// 为什么需要：task.run 的 defer 在 **Run 返回之后**才调 Stop，而这个 Stop 与
+// 事件循环的处理是并发的——循环可能已经 dispose → retryDecision → reset() 换好
+// 了下一轮的 context 并把 stopped 清零。迟到的 Stop 会把新一轮的 context 取消掉，
+// 让新 attempt 刚出生就以旧一轮的原因退出（实测：Restart() 下 attempt 2 立刻以
+// "restart" 返回，重试次数被白烧一次）。代际检查与 reset() 的递增都在 stopMu
+// 下，二者串行，没有窗口。
+func (task *Task) stopIfCurrentAttempt(gen uint32, err error) {
+	task.stopMu.Lock()
+	defer task.stopMu.Unlock()
+	if task.attemptGen.Load() != gen {
+		return
+	}
+	_, file, line, _ := runtime.Caller(1)
+	task.stopLocked(err, file, line)
+}
+
+// stopLocked 是 Stop 的锁内实现，调用方必须已持有 stopMu。
+func (task *Task) stopLocked(err error, file string, line int) {
 	if err == nil {
 		task.Error("task stop with nil error", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType(), "parent", task.GetParent().GetOwnerType())
 		panic("task stop with nil error")
 	}
+	// 先幂等取消在途退避再判 stopped：父任务停止时子任务早就是 stopped（失败那轮
+	// 已经 Stop 过），下面会直接返回；不在这里发令牌，循环就会为空等退避。
+	task.cancelRetryLocked()
 	if task.stopped {
 		return
 	}
@@ -330,6 +394,20 @@ func (task *Task) Stop(err error) {
 		task.CancelCauseFunc(err)
 	}
 	task.stop()
+}
+
+// Restart 请求重启当前任务：结束本轮执行，然后经重试通道立即重跑。
+//
+// 与 Stop 的区别：Stop 是终止（ErrStopByUser 不重试）；Restart 是「这一轮结束，
+// 再来一轮」，因此以 ErrRestart 停止，走重试通道。它会消耗一次重试预算（受
+// MaxRetry 约束——默认 MaxRetry=0 时不会重跑，需要显式 SetRetry(n, …) 或
+// SetRetry(-1, 0) 获得无界重启），但不进指数退避：ErrRestart 的退避为 0。
+//
+// 在 Phase 3 之前 ErrRestart 只是 checkRetry 末尾的一个死分支（全仓库没有
+// 生产者，见 docs/重构-执行模型v2-Phase3设计.md F21），本方法补上生产者，
+// 并让该分支遵守 MaxRetry 预算。
+func (task *Task) Restart() {
+	task.Stop(ErrRestart)
 }
 
 func (task *Task) stop() {
@@ -527,15 +605,44 @@ func (task *Task) OnStop(resource any) {
 }
 
 func (task *Task) GetSignal() any {
+	// 退避等待期间对外暴露 retryCh：本轮 attempt 已经结束、Done 已关闭，循环若
+	// 继续绑 Done 会立刻收到一次虚假的就绪信号并重复 dispose。retryCh 收到令牌
+	// 才是「退避到期」或「父任务停止」的真实信号，见 armRetry/cancelRetryLocked。
+	if task.retrying.Load() {
+		return task.retryCh
+	}
 	return task.Done()
 }
 
-func (task *Task) checkRetry(err error) bool {
-	if errors.Is(err, ErrTaskComplete) || errors.Is(err, ErrExit) || errors.Is(err, ErrStopByUser) {
-		return false
+// isTerminalStopReason reports whether err is a lifecycle outcome that must not
+// trigger a retry: normal completion, explicit exit, user stop, and timeout.
+//
+// Phase 3（3A）把它抽成任务树与泛型编排共用的判定：此前 checkRetry 只看前三者、
+// generic 侧的 shouldRetryGeneric 还额外排除 ErrTimeout，两套重试语义漂移
+// （docs/重构-执行模型v2-Phase3设计.md F22）。统一后 ErrTimeout 一律不重试，
+// 与 generic.WithTimeout 的语义一致。
+func isTerminalStopReason(err error) bool {
+	return errors.Is(err, ErrTaskComplete) || errors.Is(err, ErrExit) ||
+		errors.Is(err, ErrStopByUser) || errors.Is(err, ErrTimeout)
+}
+
+// retryDecision 判定一次失败是否值得重试：需要时消耗一次重试预算，并算出剩余的
+// 退避时长。**只判定，不等待**——路径 B（事件循环）随后用 armRetry 把退避交给
+// 定时器，循环在等待期间保持响应（Phase 3 / C5）。
+//
+// 判定顺序：终态原因 → 父任务已停止 → ShouldRetry 谓词 → 预算。
+// 谓词在预算之前：它回答「这个错误值不值得重试」，与「还有没有额度」正交；
+// 被谓词拒绝的失败不消耗预算。
+func (task *Task) retryDecision(err error) (delay time.Duration, ok bool) {
+	if isTerminalStopReason(err) {
+		return 0, false
 	}
-	if task.parent.IsStopped() {
-		return false
+	// 没有父任务时无处安放重试（RootManager 之类的特权根任务不会走到这里）。
+	if task.parent == nil || task.parent.IsStopped() {
+		return 0, false
+	}
+	if task.retry.ShouldRetry != nil && !task.retry.ShouldRetry(err) {
+		return 0, false
 	}
 	if task.retry.MaxRetry < 0 || task.retry.RetryCount < task.retry.MaxRetry {
 		task.retry.RetryCount++
@@ -544,6 +651,13 @@ func (task *Task) checkRetry(err error) bool {
 			task.Warn(fmt.Sprintf("retry %d/∞", task.retry.RetryCount), "taskId", task.ID)
 		} else {
 			task.Warn(fmt.Sprintf("retry %d/%d", task.retry.RetryCount, task.retry.MaxRetry), "taskId", task.ID)
+		}
+
+		// ErrRestart 是调用方显式的重启请求（Task.Restart）：立即重跑，不进指数
+		// 退避，但仍然消耗一次预算，避免无界重启悄悄绕过 MaxRetry（F21）。
+		if errors.Is(err, ErrRestart) {
+			task.SetDescription("retryDelay", "0s")
+			return 0, true
 		}
 
 		// Calculate exponential backoff delay: baseInterval * 2^(retryCount-1)
@@ -565,26 +679,147 @@ func (task *Task) checkRetry(err error) bool {
 		}
 
 		task.SetDescription("retryDelay", retryDelay.String())
+		// 退避起点是本轮 attempt 的开始时间（不是失败时刻），已经执行掉的时间
+		// 要从退避里扣掉——与 Phase 3 之前的内联等待完全一致。
 		if delta := time.Since(task.StartTime); delta < retryDelay {
-			timer := time.NewTimer(retryDelay - delta)
-			defer timer.Stop()
-			select {
-			case <-timer.C:
-			case <-task.parent.Done():
-				return false
-			}
+			return retryDelay - delta, true
 		}
-		if task.parent.IsStopped() {
-			return false
-		}
-		return true
-	} else {
-		if task.retry.MaxRetry > 0 {
-			task.Warn(fmt.Sprintf("max retry %d failed", task.retry.MaxRetry))
+		return 0, true
+	}
+	if task.retry.MaxRetry > 0 {
+		task.Warn(fmt.Sprintf("max retry %d failed", task.retry.MaxRetry))
+	}
+	return 0, false
+}
+
+// checkRetry 是 retryDecision 的阻塞版：判定后把退避睡完，返回是否可以重启。
+//
+// 只给两条路径用：start() 的失败路径（TaskStarter 的 Start 失败链，短且罕见）
+// 与 RunTask（调用方专用 goroutine，没有共享循环可占）。事件循环走
+// retryDecision + armRetry，退避期间循环继续处理其它事件。
+func (task *Task) checkRetry(err error) bool {
+	delay, ok := task.retryDecision(err)
+	if !ok {
+		return false
+	}
+	if delay > 0 {
+		timer := time.NewTimer(delay)
+		defer timer.Stop()
+		select {
+		case <-timer.C:
+		case <-task.parent.Done():
 			return false
 		}
 	}
-	return errors.Is(err, ErrRestart)
+	if task.parent.IsStopped() {
+		return false
+	}
+	return true
+}
+
+// armRetry 安排一次退避后的重启：等待「退避到期」与「本轮执行 goroutine 退出」
+// 两个条件都满足后，向 retryCh 投递令牌（容量 1，非阻塞）；事件循环的信号 case
+// （此刻 GetSignal 返回 retryCh）收到后执行 reset + start。
+//
+// 这是 C5 翻转的关键：退避不再由循环内联 sleep，循环在等待期间可以处理 Call、
+// 兄弟任务与其它子任务信号。等待在独立 goroutine 上做，循环本身不被占用。
+//
+// 为什么还要等 attemptDone：reset() 会替换 task.Context 等字段，而 handler 可能
+// 在 Run 返回后仍在读它们（例如 `return t.StopReason()`），二者并发就是数据竞争；
+// 同时也能避免上一轮 handler 未退出就并发跑下一轮。若 handler 无视 context 长期
+// 不返回，重试就不该发生——这正是 Go「无法强杀 goroutine」的诚实表达：父任务停止
+// 时 cancelRetryLocked 会让等待者立刻放手。
+func (task *Task) armRetry(delay time.Duration) {
+	task.stopMu.Lock()
+	defer task.stopMu.Unlock()
+	if task.retryCh == nil {
+		task.retryCh = make(chan struct{}, 1)
+	}
+	task.retrying.Store(true)
+	task.SetDescription("retryPending", true)
+	// 上一轮可能还有等待者：先让它放手，再挂新的。
+	if task.retryCancel != nil {
+		close(task.retryCancel)
+		task.retryCancel = nil
+	}
+	cancel := make(chan struct{})
+	task.retryCancel = cancel
+	ch := task.retryCh
+	retired := task.attemptDone
+	parentDone := task.parent.Done()
+	// 清掉可能残留的令牌（上一次 Stop 的唤醒令牌，属于已作废的周期）：留在缓冲区
+	// 里会让本次退避立刻被当成「到期」，跳过整个退避窗口。
+drain:
+	for {
+		select {
+		case <-ch:
+		default:
+			break drain
+		}
+	}
+	go func() {
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-cancel:
+				return
+			case <-parentDone:
+				return
+			}
+		}
+		if retired != nil {
+			select {
+			case <-retired:
+			case <-cancel:
+				return
+			case <-parentDone:
+				return
+			}
+		}
+		select {
+		case ch <- struct{}{}:
+		default: // 已经有令牌在队列里（或本轮已作废），丢弃即可
+		}
+	}()
+}
+
+// cancelRetryLocked 取消在途退避并唤醒正在等它的循环。调用方必须已持有 stopMu
+//（Stop 与 dispose 都在锁内调它）。幂等。
+//
+// 必须唤醒了才有效：退避期间子任务的 stop 早就是 true（失败那轮已经 Stop 过），
+// 父任务停止时 child.Stop 会走幂等快路径直接返回，若只关掉等待者不发令牌，
+// 循环会为一个已停的任务空等到退避结束（循环也就无法退出）。
+func (task *Task) cancelRetryLocked() {
+	if task.retryCancel != nil {
+		close(task.retryCancel)
+		task.retryCancel = nil
+	}
+	if task.retryCh != nil {
+		select {
+		case task.retryCh <- struct{}{}:
+		default:
+		}
+	}
+}
+
+// setAttemptDone 登记本轮的退出信号（start 在拉起 goroutine 前调用）。
+func (task *Task) setAttemptDone(done chan struct{}) {
+	task.stopMu.Lock()
+	task.attemptDone = done
+	task.stopMu.Unlock()
+}
+
+// waitAttemptRetired 等待本轮执行 goroutine 退出（handler 已返回）。仅供
+// RunTask 这种「调用方 goroutine 上驱动重试」的路径在 reset 之前调用。
+func (task *Task) waitAttemptRetired() {
+	task.stopMu.Lock()
+	done := task.attemptDone
+	task.stopMu.Unlock()
+	if done != nil {
+		<-done
+	}
 }
 
 func (task *Task) start() bool {
@@ -646,7 +881,10 @@ func (task *Task) start() bool {
 					// 见它。另一个顺带修复的缺陷：Run panic 被本函数的 defer 恢复后，
 					// 下面的错误路径整个被展开跳过，任务既不 Stop 也不 dispose
 					// （WaitStopped 永久挂起，见 TestContract_RunPanicRecoveredAndRetried）。
-					go task.run(runHandler.Run)
+					// 本轮退出信号：重试的等待者要等它关闭才允许 reset()（见 armRetry）。
+					attemptDone := make(chan struct{})
+					task.setAttemptDone(attemptDone)
+					go task.run(runHandler.Run, attemptDone)
 					return true
 				}
 			}
@@ -655,7 +893,9 @@ func (task *Task) start() bool {
 			if goHandler, ok := task.handler.(TaskGo); ok {
 				task.setState(TASK_STATE_GOING)
 				task.Debug("task go", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
-				go task.run(goHandler.Go)
+				attemptDone := make(chan struct{})
+				task.setAttemptDone(attemptDone)
+				go task.run(goHandler.Go, attemptDone)
 			}
 			return true
 		} else {
@@ -707,6 +947,18 @@ func (task *Task) reset() {
 	task.stopMu.Lock()
 	task.stopped = false
 	task.stopErr = nil
+	// 新一代的退避握手：上一轮遗留的等待者与令牌一并作废（重置可能在
+	// cancelRetry 之后就发生，旧令牌不能留到下一轮的 armRetry 里）。
+	if task.retryCancel != nil {
+		close(task.retryCancel)
+		task.retryCancel = nil
+	}
+	task.retrying.Store(false)
+	task.RemoveDescription("retryPending")
+	task.retryCh = make(chan struct{}, 1)
+	// 代际 +1：上一轮执行 goroutine 的 defer 若还停在 Stop 门口，会因代际不符而
+	// 放手，不再取消本轮刚建好的 context（见 stopIfCurrentAttempt）。
+	task.attemptGen.Add(1)
 	task.Context, task.CancelCauseFunc = context.WithCancelCause(task.parentCtx)
 	task.shutdown = util.NewPromise(context.Background())
 	task.startup = util.NewPromise(task.Context)
@@ -833,7 +1085,8 @@ func (task *Task) GetMaxRetry() int {
 	return task.retry.MaxRetry
 }
 
-func (task *Task) run(handler func() error) {
+func (task *Task) run(handler func() error, attemptDone chan struct{}) {
+	gen := task.attemptGen.Load()
 	var err error
 	defer func() {
 		if !ThrowPanic {
@@ -843,10 +1096,14 @@ func (task *Task) run(handler func() error) {
 			}
 		}
 		if err == nil {
-			task.Stop(ErrTaskComplete)
-		} else {
-			task.Stop(err)
+			err = ErrTaskComplete
 		}
+		// 代际守卫：本轮若已被 reset() 接管（重试/重启），Stop 必须放手，否则
+		// 会把新一轮的 context 取消掉（stopIfCurrentAttempt 的注释有完整时序）。
+		task.stopIfCurrentAttempt(gen, err)
+		// 最后一步才关：重试等待者据此确认「handler 已返回」，reset() 才允许
+		// 替换 task.Context（否则与 handler 的返回路上的读取构成数据竞争）。
+		close(attemptDone)
 	}()
 	err = handler()
 }
@@ -919,6 +1176,10 @@ func (task *Task) RunTask(t ITask, opt ...any) (err error) {
 		if !tt.checkRetry(tt.StopReason()) {
 			return tt.StopReason()
 		}
+		// reset() 会替换 Context 等字段：必须等本轮 handler 真正返回，否则与
+		// 它的返回路径并发（详见 armRetry 的注释）。事件循环那边的等待在
+		// armRetry 的 goroutine 上，这里就在调用方 goroutine 上等。
+		tt.waitAttemptRetired()
 		tt.reset()
 		if !tt.start() {
 			return tt.StopReason()

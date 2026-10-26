@@ -266,9 +266,11 @@ type TaskRun interface{ Run(ctx context.Context) error }
 4. 默认配置下**零语义变化**：C6/C7/C9/C10 等既有契约原样通过；唯一翻转是 C5；
 5. 文档与真实语义一致（含新的「超时=检测不是中断」表述）。
 
-## 9. 待决问题（评审用）
+## 9. 待决问题（评审结论已确认）
 
-- **Q1 范围**：本轮先做 3A（推荐），3B 紧随；还是 3A+3B 合并一批？C3 按 §6.1 结论不做。
-- **Q2 停止超时的超时后动作**：默认「只记录、继续等」（推荐）＋ opt-in detach；还是默认就 detach？还是只做记录不做 detach？
-- **Q3 `ShouldRetry` 谓词的接入方式**：`SetShouldRetry(func(error) bool)`（推荐，最小改动）；还是 `SetRetryPolicy(RetryConfig)` 整体替换？
-- **Q4 `ErrTimeout` 是否算「失败」**（影响升级触发与重试排除）：统一为「不重试、算失败」（推荐，与 `WithTimeout` 语义一致）；还是「不重试、不算失败」？
+- **Q1 范围 → 3A 先行（推荐项）**：先完成「重试与监督分离 + 重试语义统一」并验收提交（已落地，见 `docs/重构-执行模型v2.md` §5），3B 紧随其后；C3 按 §6.1 结论本期不做。
+- **Q2 停止超时的超时后动作 → 默认只记录 + opt-in detach（推荐项）**：默认零语义变化（保 C6），`SetStopTimeoutDetach(true)` 时才接受「父先于子销毁」。
+- **Q3 `ShouldRetry` 接入方式 → `SetShouldRetry(func(error) bool)`（推荐项）**：最小改动，不动公开结构体形态（`RetryConfig` 只加一个可选字段）。
+- **Q4 `ErrTimeout` 语义 → 不重试、算失败（推荐项）**：与 `generic.WithTimeout` 一致；3A 已实现「不重试」，3B 的故障升级按「失败」处理。
+
+**3A 实施结果**：`docs/重构-执行模型v2.md` §5（契约 C5′/C12–C15、验收证据、基准对比、行为变化，含实施中发现并修复的两处竞态 F28/F29）。

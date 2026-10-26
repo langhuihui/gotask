@@ -812,10 +812,13 @@ func (s *Server) Start() error {
 - **Trigger**: 
   - `Start` failure: Retries `Start`.
   - `Run`/`Go` failure: Calls `Dispose` then retries `Start`.
+  - `Task.Restart()`: Ends the current attempt with `ErrRestart` and retries immediately (it still consumes a retry slot, but skips the exponential backoff).
 - **Termination**:
   - Max retries reached.
-  - Specific errors (`ErrStopByUser`, `ErrExit`, `ErrTaskComplete`).
-- **Configuration**: `SetRetry(maxRetry, retryInterval)`.
+  - Terminal errors (`ErrStopByUser`, `ErrExit`, `ErrTaskComplete`, `ErrTimeout`).
+  - `SetShouldRetry(func(error) bool)` returns false for this error (the attempt is not retried and does not consume a retry slot).
+- **Backoff**: `retryInterval * 2^(retryCount-1)`, capped by `SetMaxRetryInterval`. The wait runs off the owner job's event loop, so the job keeps serving `Call` and sibling tasks while a child backs off.
+- **Configuration**: `SetRetry(maxRetry, retryInterval)`, `SetMaxRetryInterval(d)`, `SetShouldRetry(func(error) bool)`.
 
 **Code Example**:
 ```go

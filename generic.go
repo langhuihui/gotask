@@ -263,7 +263,7 @@ func shouldRetryGeneric(ctx context.Context, err error, policy RetryPolicy, retr
 	if ctx.Err() != nil {
 		return false
 	}
-	if errors.Is(err, ErrTaskComplete) || errors.Is(err, ErrExit) || errors.Is(err, ErrStopByUser) || errors.Is(err, ErrTimeout) {
+	if isTerminalStopReason(err) {
 		return false
 	}
 	if policy.MaxRetry >= 0 && retries >= policy.MaxRetry {

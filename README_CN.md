@@ -812,10 +812,13 @@ func (s *Server) Start() error {
 - **触发条件**: 
   - 当Start失败时，会重试调用Start直到成功
   - 当Run或者Go失败时，则会先调用Dispose释放资源后再调用Start开启重试流程
+  - 调用 `Task.Restart()` 时：以 `ErrRestart` 结束本轮并立即重跑（仍消耗一次重试次数，但不进指数退避）
 - **终止条件**:
   - 当重试次数满了之后就不再重试了
-  - 当Start或者Run、Go返回ErrStopByUser、ErrExit、ErrTaskComplete时，则终止重试
-- **配置方法**: 通过SetRetry(maxRetry int, retryInterval time.Duration)设置重试策略
+  - 当Start或者Run、Go返回 ErrStopByUser、ErrExit、ErrTaskComplete、ErrTimeout 时，则终止重试
+  - `SetShouldRetry(func(error) bool)` 对本次错误返回 false（不重试，也不消耗重试次数）
+- **退避与执行位置**: 退避时长按 `retryInterval * 2^(retryCount-1)` 计算，可用 `SetMaxRetryInterval` 封顶；等待不在所属 Job 的事件循环上执行，因此子任务退避期间，同 Job 的 `Call` 与兄弟任务照常被处理
+- **配置方法**: `SetRetry(maxRetry, retryInterval)`、`SetMaxRetryInterval(d)`、`SetShouldRetry(func(error) bool)`
 
 **代码示例**:
 ```go

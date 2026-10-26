@@ -23,6 +23,12 @@ import (
 //     展开跳过，start() 返回零值 false，任务被 removeChild 却永不停止、永不
 //     销毁（WaitStopped 永久挂起）。Phase 2 后 panic 在执行 goroutine 上经
 //     task.run 恢复并 Stop，回到正常信号路径。
+//
+// Phase 3（3A 重试与监督分离）设计见 docs/重构-执行模型v2-Phase3设计.md：
+//   - C5 已按新语义改写：退避不再占用 Owner 循环（旧语义被本测试在旧代码上捕获）；
+//   - C12「退避中 Stop 及时收敛」/ C13「ShouldRetry 谓词生效」/
+//     C14「Restart() 触发重试」/ C15「ErrTimeout 不重试」为本轮新增；
+//   - C9/C10/C11 的重试序列必须继续通过（本轮只改等待位置，不改序列）。
 
 // ---------- 辅助任务类型 ----------
 
@@ -83,6 +89,20 @@ func callWithin(job *Job) chan struct{} {
 		job.Call(func() { close(done) })
 	}()
 	return done
+}
+
+// waitUntil 轮询等待条件成立（超时即失败）。重试路径上的 attempt 由退避定时器与
+// 执行 goroutine 驱动，固定 sleep 会引入调度窗口，一律轮询。
+func waitUntil(t *testing.T, timeout time.Duration, cond func() bool, msg string) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("%s (timeout %v)", msg, timeout)
 }
 
 // ---------- 契约 1：Run 不占用父事件循环【Phase 2 改写：旧语义为「占用」】 ----------
@@ -202,11 +222,13 @@ func TestContract_BlockingExecutionDoesNotBlockAncestorLoop(t *testing.T) {
 	_ = parent.WaitStopped()
 }
 
-// ---------- 契约 5：重试退避占用 Owner 事件循环【可改变：Phase 3】 ----------
-
-// checkRetry 的退避等待跑在 Job 自己的事件循环上（start 的错误路径里），
-// 期间同 Job 的 Call 被堵住。Phase 3「重试与监督策略分离」时可改变此项。
-func TestContract_RetryBackoffOccupiesOwnerLoop(t *testing.T) {
+// ---------- 契约 5：重试退避不占用 Owner 事件循环【Phase 3 改写：旧语义为「占用」】 ----------
+//
+// 旧语义：checkRetry 的退避等待跑在 Job 自己的事件循环上，期间同 Job 的 Call
+// 被堵住（本测试在 Phase 3 前的代码上以 "Call blocked during retry backoff"
+// 失败）。Phase 3 后退避交给定时器，循环在等待期间继续处理其它事件，重试序列
+// 与次数不变。
+func TestContract_RetryBackoffDoesNotOccupyOwnerLoop(t *testing.T) {
 	var job Job
 	root.AddTask(&job)
 	if err := job.WaitStarted(); err != nil {
@@ -216,29 +238,25 @@ func TestContract_RetryBackoffOccupiesOwnerLoop(t *testing.T) {
 	task.SetRetry(1, 300*time.Millisecond)
 	job.AddTask(task)
 
-	// 等第一次 Run 失败并进入退避（300ms）。
-	time.Sleep(50 * time.Millisecond)
+	// 等第一次 attempt 失败并进入退避（dispose 已完成、尚未进入下一轮）。
+	waitUntil(t, 3*time.Second, func() bool {
+		return task.attempts.Load() == 1 && task.GetState() == TASK_STATE_DISPOSED
+	}, "task did not enter retry backoff")
+
+	// 退避期间同 Job 的 Call 立即完成。
+	begin := time.Now()
 	callDone := callWithin(&job)
 	select {
 	case <-callDone:
-		t.Fatal("Call completed during retry backoff: backoff runs on the owner loop")
-	case <-time.After(150 * time.Millisecond):
+		if elapsed := time.Since(begin); elapsed > 150*time.Millisecond {
+			t.Fatalf("Call took %v during retry backoff: backoff must not occupy the owner loop", elapsed)
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("Call blocked during retry backoff: backoff must not occupy the owner loop")
 	}
-	select {
-	case <-callDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Call did not complete after the retry cycle finished")
-	}
-	// 不能假设 callDone 触发时第二次 attempt 已跑完：Phase 2 后 Run 在独立
-	// goroutine 上执行，循环处理完排队的 Call 回调时，重试的执行 goroutine 可能
-	// 还没被调度（旧代码里重试内联在 start() 中，无此窗口）。轮询等待。
-	deadline := time.Now().Add(2 * time.Second)
-	for task.attempts.Load() < 2 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if got := task.attempts.Load(); got != 2 {
-		t.Fatalf("expected 2 attempts (initial + 1 retry), got %d", got)
-	}
+
+	// 退避到期后照常重试，序列不变。
+	waitUntil(t, 3*time.Second, func() bool { return task.attempts.Load() == 2 }, "retry attempt did not run after backoff")
 	_ = job.WaitStopped()
 }
 
@@ -493,5 +511,145 @@ func TestContract_RunPanicRecoveredAndRetried(t *testing.T) {
 	}
 	if err := task.StopReason(); !errors.Is(err, ErrTaskComplete) {
 		t.Fatalf("expected final stop reason ErrTaskComplete, got %v", err)
+	}
+}
+
+// ---------- Phase 3（3A）新增辅助任务类型 ----------
+
+// restartableTask：TaskBlock，每轮 Run 阻塞到自身 context 被取消后返回停止原因，
+// 用于验证 Restart() 能否拉起新的一轮。
+type restartableTask struct {
+	Task
+	attempts atomic.Int32
+}
+
+func (t *restartableTask) Run() error {
+	t.attempts.Add(1)
+	<-t.Done()
+	return t.StopReason()
+}
+
+// timeoutFailTask：TaskBlock，每轮 Run 立刻以 ErrTimeout 结束。
+type timeoutFailTask struct {
+	Task
+	attempts atomic.Int32
+}
+
+func (t *timeoutFailTask) Run() error {
+	t.attempts.Add(1)
+	return ErrTimeout
+}
+
+// ---------- 契约 12：退避期间停止，子任务被及时摘除【Phase 3 新增】 ----------
+//
+// C5 翻转后，退避不再由循环内联等待，循环必须能被「退避中的子任务被停止」唤醒：
+// 否则它会为一个已停止的任务挂到退避结束（10s 退避会把收敛拖到 10s 之后）。
+// Phase 3 前本测试同样通过（内联 sleep 靠 parent.Done 逃逸），但收敛路径不同；
+// 改造后由 cancelRetry 令牌驱动。
+func TestContract_StopDuringRetryBackoffIsPrompt(t *testing.T) {
+	var job Job
+	root.AddTask(&job)
+	if err := job.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	task := &retryFailTask{}
+	task.SetRetry(-1, 10*time.Second) // 只有主动取消才能及时收敛
+	job.AddTask(task)
+	waitUntil(t, 3*time.Second, func() bool {
+		return task.attempts.Load() == 1 && task.GetState() == TASK_STATE_DISPOSED
+	}, "task did not enter retry backoff")
+
+	job.Stop(ErrStopByUser)
+	if err := job.WaitStopped(); !errors.Is(err, ErrStopByUser) {
+		t.Fatalf("expected ErrStopByUser, got %v", err)
+	}
+	// 退避中的子任务必须被立刻摘除，而不是等完 10s 退避再继续重试。
+	waitUntil(t, 2*time.Second, func() bool { return job.Size.Load() == 0 }, "retrying child was not removed on stop")
+	if got := task.attempts.Load(); got != 1 {
+		t.Fatalf("expected 1 attempt (stop cancelled the pending retry), got %d", got)
+	}
+}
+
+// ---------- 契约 13：ShouldRetry 谓词每次失败都被询问【Phase 3 新增】 ----------
+//
+// 谓词与预算是正交的两件事：预算是「还有没有额度」，谓词是「这个错误值不值得」。
+// 谓词拒绝时不消耗额度、不重试；允许时照常消耗额度重试。
+func TestContract_ShouldRetryPredicateHonored(t *testing.T) {
+	var job Job
+	root.AddTask(&job)
+	if err := job.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	task := &retryFailTask{}
+	task.SetRetry(3, 0) // 预算充足：拦截只能来自谓词
+	// 只放行第一次失败：第 2 次失败时谓词拒绝。
+	task.SetShouldRetry(func(error) bool { return task.attempts.Load() == 1 })
+	job.AddTask(task)
+
+	waitUntil(t, 3*time.Second, func() bool { return task.attempts.Load() >= 2 }, "predicate-allowed retry did not run")
+	// 零退避下 attempt 可能在两次轮询之间跨过多轮，用「留足时间后看最终值」判定：
+	// 谓词拒绝第二次失败，第 3 轮不得发生（被忽略时会看到 3 或 4）。
+	time.Sleep(300 * time.Millisecond)
+	if got := task.attempts.Load(); got != 2 {
+		t.Fatalf("expected 2 attempts (initial + predicate-allowed retry), got %d", got)
+	}
+	if got := task.GetRetryCount(); got != 1 {
+		t.Fatalf("expected retryCount 1 (rejected attempt must not spend budget), got %d", got)
+	}
+	if err := job.WaitStopped(); !errors.Is(err, ErrAutoStop) {
+		t.Fatalf("expected ErrAutoStop, got %v", err)
+	}
+}
+
+// ---------- 契约 14：Restart() 触发下一轮【Phase 3 新增】 ----------
+//
+// ErrRestart 此前只有消费者没有生产者（F21），本契约锁定新补的 Task.Restart()：
+// 结束本轮、立即重跑、消耗一次重试预算、不进指数退避。
+func TestContract_RestartRequestTriggersRetry(t *testing.T) {
+	var job Job
+	root.AddTask(&job)
+	if err := job.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	task := &restartableTask{}
+	task.SetRetry(-1, 0) // Restart 受 MaxRetry 约束，这里给无界预算
+	job.AddTask(task)
+	waitUntil(t, 3*time.Second, func() bool { return task.attempts.Load() == 1 }, "task did not start")
+
+	task.Restart()
+	waitUntil(t, 3*time.Second, func() bool { return task.attempts.Load() == 2 }, "Restart did not trigger a new attempt")
+
+	job.Stop(ErrStopByUser)
+	_ = job.WaitStopped()
+	if got := task.GetRetryCount(); got < 1 {
+		t.Fatalf("Restart must consume a retry slot, retryCount=%d", got)
+	}
+}
+
+// ---------- 契约 15：ErrTimeout 不重试【Phase 3 新增：语义统一】 ----------
+//
+// Phase 3 前任务树只把完成/退出/用户停止视为终态，ErrTimeout 会被无限重试；
+// generic 侧（shouldRetryGeneric）却把它排除在外。Phase 3 统一为「不重试」，
+// 与 generic.WithTimeout 的语义一致（且 ErrTimeout 视为失败，供故障升级使用）。
+func TestContract_TimeoutIsNotRetried(t *testing.T) {
+	var job Job
+	root.AddTask(&job)
+	if err := job.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	task := &timeoutFailTask{}
+	task.SetRetry(-1, 0) // 若不把 ErrTimeout 视为终态，这里会无限热重试
+	job.AddTask(task)
+
+	select {
+	case <-job.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatalf("job did not stop: ErrTimeout must not be retried (attempts=%d)", task.attempts.Load())
+	}
+	if got := task.attempts.Load(); got != 1 {
+		t.Fatalf("expected 1 attempt, got %d", got)
+	}
+	if err := job.WaitStopped(); !errors.Is(err, ErrAutoStop) {
+		t.Fatalf("expected ErrAutoStop, got %v", err)
 	}
 }

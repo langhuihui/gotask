@@ -210,12 +210,33 @@ func (e *EventLoop) run(mt *Job) {
 				}
 			default:
 				if !ok {
-					if mt.onChildDispose(child); child.checkRetry(child.StopReason()) {
-						if child.reset(); child.start() {
-							e.cases[chosen].Chan = reflect.ValueOf(child.GetSignal())
-							mt.onChildStart(child)
-							continue
-						}
+					mt.onChildDispose(child)
+					if delay, retry := child.GetTask().retryDecision(child.StopReason()); retry {
+						// Phase 3（重试与监督分离，见 docs/重构-执行模型v2-Phase3设计.md）：
+						// 退避不在循环上睡——交给定时器，case 改绑到 retryCh
+						//（GetSignal 此后返回它），循环回到 select 继续处理 Call、
+						// 兄弟任务与其它子任务信号。契约：C5′。
+						child.GetTask().armRetry(delay)
+						e.cases[chosen].Chan = reflect.ValueOf(child.GetSignal())
+						continue
+					}
+					mt.removeChild(child)
+					e.removeChildCase(chosen)
+				} else {
+					// 非 IChannelTask 的子任务只有在退避等待期间才会向循环投递值：
+					// 令牌意味着退避到期，或父任务停止时 cancelRetry 的唤醒——两者
+					// 以父任务是否已停止区分。契约：C5′ / C12。
+					child.GetTask().retrying.Store(false)
+					child.GetTask().RemoveDescription("retryPending")
+					if mt.IsStopped() {
+						mt.removeChild(child)
+						e.removeChildCase(chosen)
+						continue
+					}
+					if child.reset(); child.start() {
+						e.cases[chosen].Chan = reflect.ValueOf(child.GetSignal())
+						mt.onChildStart(child)
+						continue
 					}
 					mt.removeChild(child)
 					e.removeChildCase(chosen)
