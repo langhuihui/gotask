@@ -34,7 +34,19 @@ var (
 	ErrPanic           = errors.New("panic")
 	ErrTooManyChildren = errors.New("too many children in job")
 	ErrDisposed        = errors.New("disposed")
+	// ErrChildFailed 出现在父任务的停止原因里：某个子任务以失败结束且没有重试
+	// 余地，父任务按 FailurePolicy 升级（Phase 3 3B）。原始失败原因用 errors.Join
+	// 一起携带，errors.Is 可分别匹配。
+	ErrChildFailed = errors.New("child failed")
 )
+
+// FailurePolicy 是父任务对子任务失败的处理策略（Phase 3 3B，默认全关）。
+type FailurePolicy struct {
+	// Escalate 为真时：子任务以「失败」原因结束且没有重试余地，父任务立刻以
+	// errors.Join(childReason, ErrChildFailed) 停止，兄弟子任务随级联停止。
+	// ErrTimeout 视为失败（评审 Q4）。
+	Escalate bool
+}
 
 const (
 	TASK_STATE_INIT TaskState = iota
@@ -164,6 +176,9 @@ type (
 		// 等它同时保证了不会出现「上一轮 handler 还在跑、下一轮已经起来」的并发
 		// 执行——重试的语义本来就是「上一轮结束之后再来一轮」。
 		attemptDone chan struct{}
+		// disposeTimeout 是销毁看门狗的时限（0=关闭）。超时只记录、不中断——
+		// Go 无法杀死正在执行的 Dispose/钩子（见 SetDisposeTimeout）。
+		disposeTimeout time.Duration
 		// attemptGen 是执行代际：reset() 每开一轮 +1。task.run 的 defer 拿启动时
 		// 的代际来判定「我这一轮还是不是当前轮」，避免迟到的 Stop 取消下一轮的
 		// context（见 stopIfCurrentAttempt）。
@@ -241,6 +256,15 @@ func (task *Task) SetMaxRetryInterval(maxRetryInterval time.Duration) {
 // orchestration layer finally agree on retry semantics (Phase 3 design §3.2).
 func (task *Task) SetShouldRetry(shouldRetry func(error) bool) {
 	task.retry.ShouldRetry = shouldRetry
+}
+
+// SetDisposeTimeout 设置销毁看门狗的时限；0（默认）表示关闭。
+//
+// 语义是「检测」而不是「中断」：Go 无法杀死一个正在执行的 Dispose/PreDispose/
+// OnDispose，所以超时只会打一条 Error 日志（含当前段落与 descriptions 快照）并
+// 置 disposeTimeout description，销毁本身继续执行到完成。用来定位「卡在哪一段」。
+func (task *Task) SetDisposeTimeout(d time.Duration) {
+	task.disposeTimeout = d
 }
 
 func (task *Task) GetTaskID() uint32 {
@@ -1004,6 +1028,22 @@ func (task *Task) dispose() {
 	yargs := []any{"reason", reason, "taskId", task.ID, "taskType", taskType, "ownerType", ownerType}
 	task.Debug("task dispose", yargs...)
 	defer task.Debug("task disposed", yargs...)
+	// 销毁看门狗：只检测、不中断（Go 杀不掉正在执行的 Dispose/钩子）。超时后打一条
+	// Error（携带当前 disposeProcess 段与 descriptions 快照）并置标记，销毁继续。
+	if task.disposeTimeout > 0 {
+		taskID, timeout := task.ID, task.disposeTimeout
+		watchdog := time.AfterFunc(timeout, func() {
+			disposeProcess, _ := task.GetDescription("disposeProcess")
+			task.Error("task dispose timeout",
+				"taskId", taskID,
+				"timeout", timeout,
+				"disposeProcess", disposeProcess,
+				"descriptions", task.GetDescriptions(),
+			)
+			task.SetDescription("disposeTimeout", true)
+		})
+		defer watchdog.Stop()
+	}
 	if v, ok := task.handler.(TaskPreDisposal); ok {
 		task.SetDescription("disposeProcess", "pre-dispose")
 		task.Debug("task dispose pre-dispose begin", yargs...)
@@ -1174,6 +1214,9 @@ func (task *Task) RunTask(t ITask, opt ...any) (err error) {
 		<-tt.Done()
 		tt.dispose()
 		if !tt.checkRetry(tt.StopReason()) {
+			// 与事件循环同款升级判定（RunTask 的子任务不在 e.children 里，循环
+			// 看不到它）。契约：C19。
+			mt.maybeEscalate(t, tt.StopReason())
 			return tt.StopReason()
 		}
 		// reset() 会替换 Context 等字段：必须等本轮 handler 真正返回，否则与

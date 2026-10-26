@@ -29,6 +29,11 @@ import (
 //   - C12「退避中 Stop 及时收敛」/ C13「ShouldRetry 谓词生效」/
 //     C14「Restart() 触发重试」/ C15「ErrTimeout 不重试」为本轮新增；
 //   - C9/C10/C11 的重试序列必须继续通过（本轮只改等待位置，不改序列）。
+//
+// Phase 3（3B 生命周期超时与故障升级）：
+//   - C16「停止超时默认只记录、继续等」/ C17「detach 为 opt-in」/
+//     C18「销毁超时看门狗只记录不中断」/ C19「故障升级为 opt-in」/
+//     C20「默认策略不升级」为本轮新增；默认配置下不得改变任何既有语义。
 
 // ---------- 辅助任务类型 ----------
 
@@ -652,4 +657,228 @@ func TestContract_TimeoutIsNotRetried(t *testing.T) {
 	if err := job.WaitStopped(); !errors.Is(err, ErrAutoStop) {
 		t.Fatalf("expected ErrAutoStop, got %v", err)
 	}
+}
+
+// ---------- Phase 3（3B）新增辅助任务类型 ----------
+
+// slowDisposeTask：TaskBlock，Run 阻塞到 context 取消；Dispose 阻塞到
+// disposeRelease 关闭。用于观察「父等子销毁」的时序与超时策略。
+type slowDisposeTask struct {
+	Task
+	entered        chan struct{} // Run 已进入
+	disposeEntered chan struct{} // Dispose 已开始
+	disposeRelease chan struct{} // 关闭后 Dispose 返回
+	disposeDone    chan struct{} // Dispose 已返回
+}
+
+func (t *slowDisposeTask) Run() error {
+	close(t.entered)
+	<-t.Done()
+	return t.StopReason()
+}
+
+func (t *slowDisposeTask) Dispose() {
+	close(t.disposeEntered)
+	<-t.disposeRelease
+	close(t.disposeDone)
+}
+
+func newSlowDisposeTask() *slowDisposeTask {
+	return &slowDisposeTask{
+		entered:        make(chan struct{}),
+		disposeEntered: make(chan struct{}),
+		disposeRelease: make(chan struct{}),
+		disposeDone:    make(chan struct{}),
+	}
+}
+
+// ---------- 契约 16：停止超时默认只记录、继续等待【Phase 3 3B 新增】 ----------
+//
+// 默认档（不 detach）下，超时只产生 Error 日志 + stopTimeout description，
+// 「子任务先于父任务销毁」的约定（C6）不受影响：父的 shutdown 仍然等到子任务
+// dispose 完成才落定。
+func TestContract_StopTimeoutRecordsAndKeepsWaiting(t *testing.T) {
+	var parent Job
+	parent.SetStopTimeout(50 * time.Millisecond)
+	root.AddTask(&parent)
+	if err := parent.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	child := newSlowDisposeTask()
+	parent.AddTask(child)
+	<-child.entered
+
+	parent.Stop(ErrStopByUser)
+	<-child.disposeEntered
+	// 超过 stopTimeout：记录，但不放弃等待。
+	waitUntil(t, 2*time.Second, func() bool {
+		_, ok := parent.GetDescription("stopTimeout")
+		return ok
+	}, "stopTimeout was not recorded")
+	select {
+	case <-parent.shutdown.Done():
+		t.Fatal("parent stopped waiting on the child by default: C6 must hold without opt-in detach")
+	default:
+	}
+
+	close(child.disposeRelease)
+	if err := parent.WaitStopped(); !errors.Is(err, ErrStopByUser) {
+		t.Fatalf("expected ErrStopByUser, got %v", err)
+	}
+}
+
+// ---------- 契约 17：停止超时 detach 为 opt-in【Phase 3 3B 新增】 ----------
+//
+// 开启 SetStopTimeoutDetach(true) 后，超时就放弃等待：父任务的 shutdown 在子任务
+// dispose 完成之前落定（明确打破 C6，代价由使用方显式承担）。
+func TestContract_StopTimeoutDetachOptIn(t *testing.T) {
+	var parent Job
+	parent.SetStopTimeout(50 * time.Millisecond)
+	parent.SetStopTimeoutDetach(true)
+	root.AddTask(&parent)
+	if err := parent.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	child := newSlowDisposeTask()
+	parent.AddTask(child)
+	<-child.entered
+
+	parent.Stop(ErrStopByUser)
+	<-child.disposeEntered
+	select {
+	case <-parent.shutdown.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("parent kept waiting after stop timeout despite detach")
+	}
+	// 判定 detach 确实生效：此刻子任务还在 Dispose 里。
+	select {
+	case <-child.disposeDone:
+		t.Fatal("child dispose finished before parent shutdown: detach did not take effect")
+	default:
+	}
+	close(child.disposeRelease)
+	<-child.disposeDone
+}
+
+// ---------- 契约 18：销毁超时看门狗只记录、不中断【Phase 3 3B 新增】 ----------
+func TestContract_DisposeTimeoutWatchdog(t *testing.T) {
+	var job Job
+	root.AddTask(&job)
+	if err := job.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	task := newSlowDisposeTask()
+	task.SetDisposeTimeout(50 * time.Millisecond)
+	job.AddTask(task)
+	<-task.entered
+
+	job.Stop(ErrStopByUser)
+	<-task.disposeEntered
+	waitUntil(t, 2*time.Second, func() bool {
+		v, ok := task.GetDescription("disposeTimeout")
+		flagged, _ := v.(bool)
+		return ok && flagged
+	}, "dispose watchdog did not fire")
+	// 只记录不中断：Dispose 仍卡在自己的实现里。
+	if got := task.GetState(); got != TASK_STATE_DISPOSING {
+		t.Fatalf("expected DISPOSING while Dispose is blocked, got %v", got)
+	}
+	close(task.disposeRelease)
+	_ = job.WaitStopped()
+	if got := task.GetState(); got != TASK_STATE_DISPOSED {
+		t.Fatalf("expected DISPOSED after Dispose returned, got %v", got)
+	}
+}
+
+// ---------- 契约 19：故障升级为 opt-in【Phase 3 3B 新增】 ----------
+//
+// 开启 FailurePolicy{Escalate:true} 后，子任务失败且无重试余地 → 父任务以
+// errors.Join(childReason, ErrChildFailed) 停止，兄弟子任务随级联停止。
+func TestContract_FailureEscalationOptIn(t *testing.T) {
+	t.Run("event loop", func(t *testing.T) {
+		var job Job
+		job.SetFailurePolicy(FailurePolicy{Escalate: true})
+		root.AddTask(&job)
+		if err := job.WaitStarted(); err != nil {
+			t.Fatal(err)
+		}
+		sibling := &blockingCtxRunTask{entered: make(chan struct{}), release: make(chan struct{})}
+		job.AddTask(sibling)
+		<-sibling.entered
+
+		failing := &retryFailTask{}
+		job.AddTask(failing)
+
+		select {
+		case <-job.Done():
+		case <-time.After(3 * time.Second):
+			t.Fatal("job did not escalate a child failure")
+		}
+		if err := job.WaitStopped(); !errors.Is(err, ErrChildFailed) {
+			t.Fatalf("expected escalation reason to contain ErrChildFailed, got %v", err)
+		}
+		if err := job.StopReason(); !errors.Is(err, ErrChildFailed) {
+			t.Fatalf("job stop reason lost ErrChildFailed: %v", err)
+		}
+		if got, ok := job.GetDescription("failureEscalated"); !ok || got == nil {
+			t.Fatal("failureEscalated description not recorded")
+		}
+		// 兄弟任务被级联停止。
+		select {
+		case <-sibling.shutdown.Done():
+		case <-time.After(2 * time.Second):
+			t.Fatal("sibling was not stopped by escalation")
+		}
+	})
+
+	t.Run("RunTask", func(t *testing.T) {
+		var owner Job
+		owner.SetFailurePolicy(FailurePolicy{Escalate: true})
+		root.AddTask(&owner)
+		if err := owner.WaitStarted(); err != nil {
+			t.Fatal(err)
+		}
+		child := &retryFailTask{}
+		if err := owner.RunTask(child); err == nil {
+			t.Fatal("expected RunTask to report the child failure")
+		}
+		select {
+		case <-owner.Done():
+		case <-time.After(3 * time.Second):
+			t.Fatal("owner did not escalate a RunTask child failure")
+		}
+		if err := owner.WaitStopped(); !errors.Is(err, ErrChildFailed) {
+			t.Fatalf("expected escalation reason to contain ErrChildFailed, got %v", err)
+		}
+	})
+}
+
+// ---------- 契约 20：默认策略下子任务失败不升级【Phase 3 3B 新增】 ----------
+func TestContract_FailurePolicyDefaultKeepsRunning(t *testing.T) {
+	var job Job // 未设置 FailurePolicy
+	root.AddTask(&job)
+	if err := job.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	sibling := &blockingCtxRunTask{entered: make(chan struct{}), release: make(chan struct{})}
+	job.AddTask(sibling)
+	<-sibling.entered
+
+	failing := &retryFailTask{}
+	job.AddTask(failing)
+
+	// 给失败处理留足时间：默认策略下父 Job 必须继续运行。
+	time.Sleep(300 * time.Millisecond)
+	select {
+	case <-job.Done():
+		t.Fatal("job stopped on child failure without escalation policy")
+	default:
+	}
+	select {
+	case <-sibling.shutdown.Done():
+		t.Fatal("sibling was stopped without escalation policy")
+	default:
+	}
+	job.Stop(ErrStopByUser)
+	_ = job.WaitStopped()
 }

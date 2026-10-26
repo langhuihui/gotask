@@ -874,6 +874,21 @@ func (h *HTTPFilePuller) Dispose() {
 - Reduces complexity of manual retry logic.
 - Supports intelligent retry strategies.
 
+**Lifecycle Timeouts and Failure Escalation**
+
+Both are opt-in and default to the historical behaviour (wait forever, no escalation):
+
+```go
+job.SetStopTimeout(5 * time.Second)   // how long to wait for each child to finish disposing (0 = forever)
+job.SetStopTimeoutDetach(true)        // on timeout, stop waiting and let the parent dispose (breaks "child before parent")
+child.SetDisposeTimeout(3 * time.Second) // watchdog only: logs where Dispose is stuck, never interrupts
+job.SetFailurePolicy(task.FailurePolicy{Escalate: true}) // a failed child stops the whole job with ErrChildFailed
+```
+
+- **Stop timeout** — by default a timeout is only *recorded* (`stopTimeout` description + an error log) and the wait continues, so "children dispose before parents" still holds. Detaching is an explicit opt-in that accepts the opposite order.
+- **Dispose timeout** — Go cannot kill a running `Dispose`, so this is detection only: an error log with the current dispose stage plus a `disposeTimeout` flag.
+- **Failure escalation** — `ErrTimeout` counts as a failure. The parent stops with `errors.Join(childReason, ErrChildFailed)` and its siblings cascade down the normal stop path; a parent that is already stopping keeps its own reason.
+
 #### 9. Storable History Records
 **Pain Point**: Task execution history is crucial for monitoring and diagnosis but often missing in traditional frameworks.
 
@@ -1028,6 +1043,10 @@ Tasks are started by calling the parent task's AddTask, which puts them in a que
 
 **Retry Mechanism**:
 - `SetRetry(maxRetry int, retryInterval time.Duration)` - Set retry strategy
+- `SetMaxRetryInterval(maxRetryInterval time.Duration)` - Cap the exponential backoff
+- `SetShouldRetry(func(error) bool)` - Custom "worth retrying" predicate (does not spend a retry slot)
+- `Restart()` - End the current attempt and retry immediately (spends a retry slot, no backoff)
+- `SetDisposeTimeout(d time.Duration)` - Dispose watchdog (detection only, never interrupts; 0 = off)
 - `ResetRetryCount()` - Reset retry count
 - `GetRetryCount() int` - Get current retry count
 - `GetMaxRetry() int` - Get maximum retry count
@@ -1067,6 +1086,12 @@ Tasks are started by calling the parent task's AddTask, which puts them in a que
 
 **Thread Safety**:
 - `Call(callback func())` - Execute function in child task goroutine
+
+**Lifecycle policy** (set before start):
+- `SetStopTimeout(d time.Duration)` - How long to wait for each child to finish disposing (0 = forever)
+- `SetStopTimeoutDetach(bool)` - Give up waiting after the timeout (opt-in, breaks "child before parent")
+- `SetFailurePolicy(FailurePolicy)` - What to do when a child fails (`Escalate` off by default)
+- `SetEventLoopBufferSize(size int)` - Set the event loop channel capacity
 
 ### Global Functions
 

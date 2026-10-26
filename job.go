@@ -2,6 +2,7 @@ package task
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"runtime"
@@ -47,6 +48,64 @@ type Job struct {
 	blocked                     ITask
 	eventLoop                   EventLoop
 	Size                        atomic.Int32
+	// stopTimeout / stopTimeoutDetach 控制「本 Job 等待子任务销毁」的容忍时长与
+	// 超时后的动作，由 SetStopTimeout/SetStopTimeoutDetach 在 Job 启动前设置。
+	stopTimeout       time.Duration
+	stopTimeoutDetach bool
+	// failurePolicy 由 SetFailurePolicy 在启动前设置，默认零值=不升级。
+	failurePolicy FailurePolicy
+}
+
+// SetStopTimeout 设置本 Job 停止时等待每个子任务完成销毁的时限；0（默认）表示
+// 无限等待。超时后只记录（Error 日志 + stopTimeout description）并继续等——
+// 默认档不改变「子任务先于父任务销毁」的约定（C6）。
+//
+// 必须在 Job 启动前调用（与 SetEventLoopBufferSize 同约定）。
+func (mt *Job) SetStopTimeout(d time.Duration) {
+	mt.stopTimeout = d
+}
+
+// SetStopTimeoutDetach 决定停止超时到点后的动作。false（默认）＝只记录并继续等；
+// true（opt-in）＝放弃等待、父任务继续销毁。**代价**：打破「子任务先于父任务
+// 销毁」的约定，父任务的 OnDispose 可能在子任务 shutdown 落定之前跑完。
+// 只在业务明确接受该代价时开启。
+func (mt *Job) SetStopTimeoutDetach(detach bool) {
+	mt.stopTimeoutDetach = detach
+}
+
+// SetFailurePolicy 设置子任务失败的处理策略（Phase 3 3B，默认不升级）。
+// 必须在 Job 启动前调用。
+func (mt *Job) SetFailurePolicy(p FailurePolicy) {
+	mt.failurePolicy = p
+}
+
+// maybeEscalate 在子任务以失败结束且没有重试余地时，按策略升级为本 Job 的失败。
+//
+// 走的是既有 Stop 链路：父停止 → 父 dispose → waitChildrenDispose 让兄弟子任务
+// 收到同一个原因停下来，不引入新的停止路径。升级是显式的 Stop（不是自动停止），
+// 所以 Work 的 keepalive 不豁免它——常驻容器也不该静默吞掉子任务失败。
+func (mt *Job) maybeEscalate(child ITask, reason error) {
+	if !mt.failurePolicy.Escalate || !isFailureReason(reason) {
+		return
+	}
+	if mt.IsStopped() {
+		// 已经在停（用户停止/上一级级联）：不覆盖既有停止原因。
+		return
+	}
+	mt.Warn("escalating child failure", "childId", child.GetTaskID(), "childType", child.GetTaskType(), "ownerType", child.GetOwnerType(), "reason", reason)
+	mt.SetDescription("failureEscalated", child.GetTaskID())
+	mt.Stop(errors.Join(reason, ErrChildFailed))
+}
+
+// isFailureReason reports whether a stop reason means "this task failed" rather
+// than a normal lifecycle outcome. ErrTimeout counts as a failure (Phase 3 评审 Q4):
+// a timeout is an abnormal end even though it is never retried.
+func isFailureReason(err error) bool {
+	if err == nil {
+		return false
+	}
+	return !errors.Is(err, ErrTaskComplete) && !errors.Is(err, ErrAutoStop) &&
+		!errors.Is(err, ErrStopByUser) && !errors.Is(err, ErrExit)
 }
 
 func (*Job) GetTaskType() TaskType {
@@ -85,14 +144,22 @@ func (mt *Job) waitChildStopped(child ITask) error {
 		done <- child.GetTask().shutdown.Await()
 	}()
 
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+	// 心跳与超时是两件事：心跳（30s）是常态可观测性；stopTimeout 是业务配置的
+	// 容忍上限，默认 0 = 无限等（与 Phase 3 之前的语义一致）。
+	heartbeat := time.NewTicker(30 * time.Second)
+	defer heartbeat.Stop()
+	var deadline <-chan time.Time
+	if mt.stopTimeout > 0 {
+		timer := time.NewTimer(mt.stopTimeout)
+		defer timer.Stop()
+		deadline = timer.C
+	}
 	for {
 		select {
 		case err := <-done:
 			return err
-		case <-ticker.C:
-			mt.Warn(
+		case <-heartbeat.C:
+			mt.Debug(
 				"wait child dispose stalled",
 				"childId", child.GetTaskID(),
 				"childType", child.GetTaskType(),
@@ -100,6 +167,27 @@ func (mt *Job) waitChildStopped(child ITask) error {
 				"childState", child.GetState(),
 				"childDescriptions", child.GetDescriptions(),
 			)
+		case <-deadline:
+			// 只报一次：超时后关掉这个分支，避免每个心跳都刷 Error。
+			deadline = nil
+			mt.Error(
+				"wait child dispose timeout",
+				"childId", child.GetTaskID(),
+				"childType", child.GetTaskType(),
+				"childOwner", child.GetOwnerType(),
+				"childState", child.GetState(),
+				"timeout", mt.stopTimeout,
+				"childDescriptions", child.GetDescriptions(),
+			)
+			mt.SetDescription("stopTimeout", mt.stopTimeout.String())
+			if mt.stopTimeoutDetach {
+				// opt-in：放弃等待，父任务继续销毁。代价是打破 C6 ——父的
+				// OnDispose 可能先于子任务的 shutdown 落定。返回 ErrTimeout 只是
+				// 让外层的 Debug 日志带上原因，不作为停止原因传播。
+				mt.SetDescription("stopTimeoutDetach", child.GetTaskID())
+				mt.Warn("giving up waiting for child dispose", "childId", child.GetTaskID(), "timeout", mt.stopTimeout)
+				return ErrTimeout
+			}
 		}
 	}
 }

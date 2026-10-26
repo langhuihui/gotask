@@ -102,7 +102,7 @@
 
 **两个独立开关，默认值都保持现状（零语义变化）**，只在显式配置后生效。
 
-**3B.1 停止超时**（`Task.SetStopTimeout(d)`，默认 0 = 无限等）
+**3B.1 停止超时**（`Job.SetStopTimeout(d)`，默认 0 = 无限等。实现偏差：设计初稿写的是 `Task.`，落地在 `Job` 上——它是「父任务等子任务销毁」的容忍时长，挂叶子任务上没有意义）
 
 - 位置：`waitChildStopped` 的 30s ticker 循环改造成 `select { case err := <-done; case <-deadline }`；现有的 30s 心跳日志保留（降为 Debug，超时记 Error）。
 - 超时后的动作按「保守 → 强制」分两档，由同一个配置的时间点决定：
@@ -273,4 +273,4 @@ type TaskRun interface{ Run(ctx context.Context) error }
 - **Q3 `ShouldRetry` 接入方式 → `SetShouldRetry(func(error) bool)`（推荐项）**：最小改动，不动公开结构体形态（`RetryConfig` 只加一个可选字段）。
 - **Q4 `ErrTimeout` 语义 → 不重试、算失败（推荐项）**：与 `generic.WithTimeout` 一致；3A 已实现「不重试」，3B 的故障升级按「失败」处理。
 
-**3A 实施结果**：`docs/重构-执行模型v2.md` §5（契约 C5′/C12–C15、验收证据、基准对比、行为变化，含实施中发现并修复的两处竞态 F28/F29）。
+**实施结果**：3A 与 3B 均已落地，见 `docs/重构-执行模型v2.md` §5——契约 C5′/C12–C20（共 20 条）、验收证据、基准对比、行为变化，含实施中发现并修复的两处竞态 F28/F29。3B 的落地细节：`StopTimeout` 挂在 `Job`（见 §3.3 偏差记录）、`DisposeTimeout` 仍在 `Task`、`FailurePolicy` 挂在 `Job`。

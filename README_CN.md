@@ -874,6 +874,21 @@ func (h *HTTPFilePuller) Dispose() {
 - 减少了手动重试逻辑的复杂性
 - 支持智能化的重试策略
 
+**生命周期超时与故障升级**
+
+两者都是 opt-in，默认保持历史行为（无限等待、不升级）：
+
+```go
+job.SetStopTimeout(5 * time.Second)      // 等待每个子任务销毁的容忍时长（0=无限）
+job.SetStopTimeoutDetach(true)           // 超时即放弃等待、父任务继续销毁（打破「子先于父」）
+child.SetDisposeTimeout(3 * time.Second) // 仅看门狗：记录卡在哪一段，不中断
+job.SetFailurePolicy(task.FailurePolicy{Escalate: true}) // 子任务失败时以 ErrChildFailed 停掉整个 Job
+```
+
+- **停止超时**：默认档下超时**只记录**（`stopTimeout` description + Error 日志）并继续等，因此「子任务先于父任务销毁」仍然成立；detach 是显式可选，接受相反的时序。
+- **销毁超时**：Go 无法杀死正在执行的 `Dispose`，所以只做检测——带当前销毁段落的 Error 日志 + `disposeTimeout` 标记。
+- **故障升级**：`ErrTimeout` 也算失败。父任务以 `errors.Join(childReason, ErrChildFailed)` 停止，兄弟子任务沿既有停止链路级联；已经在停止中的父任务不会覆盖自己的停止原因。
+
 #### 9. 可存入历史记录
 **业务痛点**: 任务执行历史对于系统监控、问题诊断、性能分析等非常重要，但传统的任务框架往往缺乏历史记录功能。
 
@@ -1030,6 +1045,10 @@ if ThrowPanic {
 
 **重试机制**:
 - `SetRetry(maxRetry int, retryInterval time.Duration)` - 设置重试策略
+- `SetMaxRetryInterval(maxRetryInterval time.Duration)` - 设置退避上限
+- `SetShouldRetry(func(error) bool)` - 自定义「值不值得重试」的判定（不消耗重试次数）
+- `Restart()` - 结束本轮并立即重跑（消耗一次重试次数，不进指数退避）
+- `SetDisposeTimeout(d time.Duration)` - 销毁看门狗时限（只记录不中断，0=关闭）
 - `ResetRetryCount()` - 重置重试计数
 - `GetRetryCount() int` - 获取当前重试次数
 - `GetMaxRetry() int` - 获取最大重试次数
@@ -1069,6 +1088,12 @@ if ThrowPanic {
 
 **线程安全**:
 - `Call(callback func())` - 在子任务协程中执行函数
+
+**生命周期策略**（均需在启动前设置）:
+- `SetStopTimeout(d time.Duration)` - 等待每个子任务销毁的容忍时长（0=无限）
+- `SetStopTimeoutDetach(bool)` - 超时后是否放弃等待（opt-in，打破「子先于父」）
+- `SetFailurePolicy(FailurePolicy)` - 子任务失败的处理策略（`Escalate` 默认关）
+- `SetEventLoopBufferSize(size int)` - 设置事件循环通道容量
 
 #### 全局函数
 

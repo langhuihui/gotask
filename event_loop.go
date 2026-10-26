@@ -211,7 +211,8 @@ func (e *EventLoop) run(mt *Job) {
 			default:
 				if !ok {
 					mt.onChildDispose(child)
-					if delay, retry := child.GetTask().retryDecision(child.StopReason()); retry {
+					reason := child.StopReason()
+					if delay, retry := child.GetTask().retryDecision(reason); retry {
 						// Phase 3（重试与监督分离，见 docs/重构-执行模型v2-Phase3设计.md）：
 						// 退避不在循环上睡——交给定时器，case 改绑到 retryCh
 						//（GetSignal 此后返回它），循环回到 select 继续处理 Call、
@@ -220,6 +221,9 @@ func (e *EventLoop) run(mt *Job) {
 						e.cases[chosen].Chan = reflect.ValueOf(child.GetSignal())
 						continue
 					}
+					// 重试耗尽（或本就不可重试）的失败：按父任务的 FailurePolicy
+					// 决定是否升级（opt-in，默认不升级）。契约：C19/C20。
+					mt.maybeEscalate(child, reason)
 					mt.removeChild(child)
 					e.removeChildCase(chosen)
 				} else {
