@@ -1,18 +1,15 @@
-//go:build v2
-
 package task
 
-// v2 公开 API 面的编译期锁定。
+// v2 公开 API 面的编译期锁定（常驻看门狗）。
 //
-// 这是「契约先行」的编译期形式：本文件用的是 v2 **目标形态**的符号，因此在实施
-// 前（TaskRun 尚未落地）用 `go build -tags v2 ./...` 必然编译失败——这就是预期
-// 的红灯。S3/S4 完成、符号到位后转绿，届时去掉 build tag 让它成为常驻的 API 面
-// 看门狗：任何人把已删除的 API 加回来、或往 TaskRun 里夹带新方法，都会在这里
-// 编译失败。
+// 这些断言只做「必须存在 / 必须不多不少」的检查。它们是 v2 收口的一部分：
+// 任何人把已删除的 API 加回来、或往 TaskRun 里夹带第二个方法，都会在这里编译
+// 失败，而不是等到下游「某个任务突然不被调度」才发现。
 //
-// 只做「必须存在 / 必须不多不少」的正向与反向断言。符号**必须消失**那一类
-// （FromPointer / GetTaskPointer / Singleton / AnyTaskFunc / GetKey /
-// TASK_STATE_GOING）无法用编译期断言表达，由验收门 A7 的 `go doc` 核验兜底。
+// 符号**必须消失**那一类（FromPointer / GetTaskPointer / Singleton /
+// AnyTaskFunc 族 / Task.GetKey / TASK_STATE_GOING）无法用编译期断言反向表达，
+// 由验收门 A7 的 `go doc` 核验兜底——详见 docs/重构-执行模型v2-大版本v2设计.md
+// §4.2 与 §8。
 
 import (
 	"context"
