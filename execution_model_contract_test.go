@@ -853,6 +853,47 @@ func TestContract_FailureEscalationOptIn(t *testing.T) {
 	})
 }
 
+// ---------- 契约 21：启动时间快照可跨 goroutine 读【Phase 4 4B 新增】 ----------
+//
+// 公开字段 StartTime 写在事件循环（或 RunTask 的调用方）goroutine 上，其他
+// goroutine 直接读它是数据竞争（dashboard 曾长期这么读）。GetStartTime/Elapsed
+// 读的是 startNano 原子快照，本契约在 -race 下从测试 goroutine 读它，
+// 同时锁定「未启动任务返回零值 / 0」。
+func TestContract_StartTimeSnapshot(t *testing.T) {
+	var job Job
+	root.AddTask(&job)
+	if err := job.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+	task := &blockingCtxRunTask{entered: make(chan struct{}), release: make(chan struct{})}
+	job.AddTask(task)
+	<-task.entered
+
+	done := make(chan time.Time, 1)
+	go func() { done <- task.GetStartTime() }()
+	var snapshot time.Time
+	select {
+	case snapshot = <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("GetStartTime blocked")
+	}
+	if snapshot.IsZero() {
+		t.Fatal("GetStartTime returned the zero time for a started task")
+	}
+	// 系统时钟有粒度（Windows 上实测刚启动的 Elapsed() 可能正好为 0），
+	// 轮询等它变正，而不是要求立刻 > 0。
+	waitUntil(t, time.Second, func() bool { return task.Elapsed() > 0 }, "Elapsed() never became positive for a running task")
+
+	var unstarted Task
+	if !unstarted.GetStartTime().IsZero() || unstarted.Elapsed() != 0 {
+		t.Fatalf("unstarted task must report a zero start time, got %v / %v", unstarted.GetStartTime(), unstarted.Elapsed())
+	}
+
+	close(task.release)
+	job.Stop(ErrStopByUser)
+	_ = job.WaitStopped()
+}
+
 // ---------- 契约 20：默认策略下子任务失败不升级【Phase 3 3B 新增】 ----------
 func TestContract_FailurePolicyDefaultKeepsRunning(t *testing.T) {
 	var job Job // 未设置 FailurePolicy

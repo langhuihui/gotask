@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -38,6 +40,7 @@ func (t *TimerTask) Tick(tick any) {
 // TestLesson05 Test TickTask Timer Task
 func TestLesson05(t *testing.T) {
 	t.Log("=== Lesson 5: TickTask Timer Task ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Learning Objective: Understand TickTask's timing execution mechanism")
 	t.Log("Task: Uncomment the relevant code in TimerTask.Start() to implement timer task logic")
 

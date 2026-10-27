@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 // To avoid type redeclaration, use different type names here
@@ -33,6 +35,7 @@ type ManagerJob struct {
 // TestLesson02 Test Job container management
 func TestLesson02_1(t *testing.T) {
 	t.Log("=== Lesson 2-1: Job Container Management ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn how to use Job to manage multiple subtasks, understand task hierarchy structure")
 	t.Log("Core Concept: Job container can contain multiple subtasks, managing parent-child task lifecycle relationships")
 	t.Log("Important Feature: When all subtasks complete, Job automatically stops and enters Disposed state")
@@ -83,6 +86,8 @@ func TestLesson02_2(t *testing.T) {
 	t.Log("Core Concept: Tasks without Run method will remain running after Start, won't automatically end")
 	t.Log("Learning Content: Task state management, long-running task characteristics, Job container stop conditions")
 
+	t.Skip("exercise: uncomment the Run method of WorkerTask02_2 (and delete this line) to see the Job auto-stop")
+
 	// Create management task
 	manager := &ManagerJob{JobName: "Work Manager"}
 
@@ -95,14 +100,28 @@ func TestLesson02_2(t *testing.T) {
 		workers[i-1] = &WorkerTask02_2{WorkerID: i}
 		manager.AddTask(workers[i-1])
 	}
-	time.AfterFunc(1*time.Second, func() {
-		if manager.GetState() == task.TASK_STATE_DISPOSED {
-			t.Log("Lesson 2-2 test passed: Job Container Management")
-			return
+
+	// Workers without Run keep running after Start, so the Job never auto-stops.
+	// Observe that first, then stop it explicitly. (The old version called
+	// manager.WaitStopped() here and hung forever: this lesson is about exactly
+	// that property, so waiting for an automatic stop deadlocks the course.)
+	time.Sleep(1500 * time.Millisecond)
+	if got := manager.GetState(); got == task.TASK_STATE_DISPOSED {
+		t.Fatalf("Job auto-stopped although its workers never finish (state=%v)", got)
+	}
+	for _, w := range workers {
+		if got := w.GetState(); got != task.TASK_STATE_STARTED {
+			t.Fatalf("worker %d should still be running, got state=%v", w.WorkerID, got)
 		}
-		t.Errorf("Course not passed")
-	})
-	manager.WaitStopped()
+	}
+
+	manager.Stop(task.ErrStopByUser)
+	if err := manager.WaitStopped(); err != nil {
+		t.Fatalf("manager did not stop: %v", err)
+	}
+	if got := manager.GetState(); got != task.TASK_STATE_DISPOSED {
+		t.Fatalf("expected DISPOSED after Stop, got %v", got)
+	}
 }
 
 type WorkerTask02_3 struct {
@@ -118,6 +137,7 @@ func (t *WorkerTask02_3) Start() error {
 // TestLesson02_3 Test Job's Stop method causes all subtasks to be Stopped
 func TestLesson02_3(t *testing.T) {
 	t.Log("=== Lesson 2-3: Job Stop Propagation Mechanism ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Understand the impact of Job's Stop method on subtasks")
 	t.Log("Core Concept: Calling Job's Stop method causes all subtasks to be Stopped")
 	t.Log("Learning Content: Job stop propagation, subtask lifecycle management")

@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -32,6 +34,7 @@ type ServerWork struct {
 // TestLesson03 Test Work long-running tasks
 func TestLesson03(t *testing.T) {
 	t.Log("=== Lesson 3: Work Long-running Tasks ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn difference between Work and Job, understand long-running task container characteristics")
 	t.Log("Core Concept: Work's keepalive returns true, even if all subtasks complete, Work won't automatically stop")
 	t.Log("Comparison with Job: Job automatically stops when all subtasks complete, while Work continues running")

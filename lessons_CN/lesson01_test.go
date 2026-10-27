@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -37,6 +39,7 @@ func (t *MyFirstTask) Dispose() {
 // TestLesson01 测试基础Task使用
 func TestLesson01_1(t *testing.T) {
 	t.Log("=== Lesson 1-1: 基础Task使用 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习GoTask框架中最基本的Task使用方法")
 	t.Log("关键概念：任务需要使用AddTask才能运行（父任务驱动子任务运行）")
 
@@ -70,6 +73,7 @@ type MyFirstTask2 struct {
 // TestLesson01_2 Run方法的使用
 func TestLesson01_2(t *testing.T) {
 	t.Log("=== Lesson 1-2: Run方法的使用 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习GoTask框架中继承Task的使用方法和Run 方法的使用")
 	t.Log("关键概念：Run方法会自动进入RUNNING状态")
 
@@ -101,6 +105,7 @@ type MyFirstTask3 struct {
 // TestLesson01_3 Go方法的使用
 func TestLesson01_3(t *testing.T) {
 	t.Log("=== Lesson 1-3: Go方法的使用 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习GoTask框架中Go方法的使用，理解Go方法与Run方法的区别")
 	t.Log("关键概念：Go方法会自动进入GOING状态，在独立协程中运行")
 

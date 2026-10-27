@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (

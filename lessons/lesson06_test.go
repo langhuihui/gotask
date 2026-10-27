@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -40,6 +42,7 @@ func (s *SimpleService) Dispose() {
 // TestLesson06 Test RootManager as WorkCollection functionality
 func TestLesson06(t *testing.T) {
 	t.Log("=== Lesson 6: RootManager as WorkCollection Work Set Management ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn how to use RootManager as WorkCollection to manage service sets")
 	t.Log("Core Concepts: WorkCollection provides collection operations, supports key-value management, search, iteration, etc.")
 
@@ -143,6 +146,7 @@ func (c *CustomService) Dispose() {
 // TestLesson06_2 Test WorkCollection generic collection functionality
 func TestLesson06_2(t *testing.T) {
 	t.Log("=== Lesson 6.2: WorkCollection Generic Collection Functionality Test ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn how to use WorkCollection generic collection to manage different types of services")
 	t.Log("Core Concepts: Generic type safety, type inference, collection operation methods")
 

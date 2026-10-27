@@ -16,6 +16,7 @@ type TaskInfo struct {
 	State            task.TaskState    `json:"state"`
 	Blocked          *TaskInfo         `json:"blocked,omitempty"`
 	Blocking         bool              `json:"blocking,omitempty"`
+	// Pointer 保留 JSON 键以兼容前端；值自 Phase 4 起为任务 ID（uintptr 身份已弃用）。
 	Pointer          uint64            `json:"pointer"`
 	Children         []*TaskInfo       `json:"children,omitempty"`
 	Parent           *TaskInfo         `json:"parent,omitempty"`

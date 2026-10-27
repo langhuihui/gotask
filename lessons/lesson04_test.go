@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -48,6 +50,7 @@ func (p *MessageProducer) Run() error {
 // TestLesson04 Test ChannelTask communication tasks
 func TestLesson04(t *testing.T) {
 	t.Log("=== Lesson 4: ChannelTask Communication Tasks ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Learning Objective: Understand ChannelTask's message processing mechanism")
 	t.Log("Task: Uncomment t.ProcessMessage(msg) in MessageTask.Tick() and delete _ = msg")
 	t.Log("If code not modified, test will fail!")

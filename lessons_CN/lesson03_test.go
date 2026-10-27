@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -32,6 +34,7 @@ type ServerWork struct {
 // TestLesson03 测试Work长期运行任务
 func TestLesson03(t *testing.T) {
 	t.Log("=== Lesson 3: Work长期运行任务 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习Work和Job的区别，理解长期运行任务容器的特性")
 	t.Log("核心概念：Work的keepalive返回true，即使所有子任务完成，Work也不会自动停止")
 	t.Log("对比Job：Job在所有子任务完成后会自动停止，而Work会持续运行")

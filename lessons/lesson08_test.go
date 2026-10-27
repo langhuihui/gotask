@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -48,6 +50,7 @@ type RetryManager struct {
 // TestLesson08 Test retry mechanism
 func TestLesson08(t *testing.T) {
 	t.Log("=== Lesson 8: Retry Mechanism ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn how to use retry mechanism to handle failed tasks, understand error recovery strategies")
 	t.Log("Core Concepts: SetRetry method sets retry strategy, supports limited retries and unlimited retries")
 	t.Log("Learning Content: Retry interval settings, retry status monitoring, error recovery strategies")

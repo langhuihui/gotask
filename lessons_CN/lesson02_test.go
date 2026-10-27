@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 // 为了避免类型重复声明，这里使用不同的类型名
@@ -33,6 +35,7 @@ type ManagerJob struct {
 // TestLesson02 测试Job容器管理
 func TestLesson02_1(t *testing.T) {
 	t.Log("=== Lesson 2-1: Job容器管理 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习如何使用Job来管理多个子任务，了解任务层次结构")
 	t.Log("核心概念：Job容器可以包含多个子任务，管理父子任务的生命周期关系")
 	t.Log("重要特性：当所有子任务完成后，Job会自动停止并进入Disposed状态")
@@ -83,6 +86,8 @@ func TestLesson02_2(t *testing.T) {
 	t.Log("核心概念：没有Run方法的任务会在Start后保持运行状态，不会自动结束")
 	t.Log("学习内容：任务状态管理、长期运行任务的特性、Job容器的停止条件")
 
+	t.Skip("练习：取消 WorkerTask02_2 的 Run 方法注释（并删除本行），观察 Job 是否自动停止")
+
 	// 创建管理任务
 	manager := &ManagerJob{JobName: "工作管理器"}
 
@@ -95,14 +100,27 @@ func TestLesson02_2(t *testing.T) {
 		workers[i-1] = &WorkerTask02_2{WorkerID: i}
 		manager.AddTask(workers[i-1])
 	}
-	time.AfterFunc(1*time.Second, func() {
-		if manager.GetState() == task.TASK_STATE_DISPOSED {
-			t.Log("Lesson 2-2 测试通过：Job容器管理")
-			return
+
+	// 没有 Run 的 worker 启动后会一直运行，Job 不会自动停止：先观察，再主动停止。
+	//（旧写法在这里 manager.WaitStopped() 会永久挂起——本课讲的正是这个特性，
+	//  所以不能等它自动结束，否则教程自己就死锁。）
+	time.Sleep(1500 * time.Millisecond)
+	if got := manager.GetState(); got == task.TASK_STATE_DISPOSED {
+		t.Fatalf("worker 不会结束时 Job 却自动停止了（state=%v）", got)
+	}
+	for _, w := range workers {
+		if got := w.GetState(); got != task.TASK_STATE_STARTED {
+			t.Fatalf("worker %d 应仍在运行，实际 state=%v", w.WorkerID, got)
 		}
-		t.Errorf("课程未通过")
-	})
-	manager.WaitStopped()
+	}
+
+	manager.Stop(task.ErrStopByUser)
+	if err := manager.WaitStopped(); err != nil {
+		t.Fatalf("manager 未能停止：%v", err)
+	}
+	if got := manager.GetState(); got != task.TASK_STATE_DISPOSED {
+		t.Fatalf("Stop 之后应为 DISPOSED，实际 %v", got)
+	}
 }
 
 type WorkerTask02_3 struct {
@@ -118,6 +136,7 @@ func (t *WorkerTask02_3) Start() error {
 // TestLesson02_3 测试Job的Stop方法会导致所有子任务被Stop
 func TestLesson02_3(t *testing.T) {
 	t.Log("=== Lesson 2-3: Job的Stop传播机制 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：理解Job的Stop方法对子任务的影响")
 	t.Log("核心概念：调用Job的Stop方法会导致所有子任务被Stop")
 	t.Log("学习内容：Job的停止传播、子任务生命周期管理")

@@ -229,6 +229,28 @@ func (task *Task) GetLevel() byte {
 	return task.level
 }
 
+// GetStartTime 返回本轮启动时间的原子快照；任务尚未启动时返回零值。
+//
+// 公开字段 StartTime 写在事件循环（或 RunTask 的调用方）goroutine 上，其他
+// goroutine 直接读它就是数据竞争——框架内部的 Debug 早已改读 startNano 快照，
+// 但这个访问器直到 Phase 4 才公开（此前 dashboard 一直在踩）。
+func (task *Task) GetStartTime() time.Time {
+	nano := task.startNano.Load()
+	if nano == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, nano)
+}
+
+// Elapsed 返回自本轮启动以来的时长；任务尚未启动时返回 0。
+func (task *Task) Elapsed() time.Duration {
+	nano := task.startNano.Load()
+	if nano == 0 {
+		return 0
+	}
+	return time.Since(time.Unix(0, nano))
+}
+
 func (task *Task) GetParent() ITask {
 	if task.parent != nil {
 		return task.parent.handler

@@ -1020,6 +1020,8 @@ if ThrowPanic {
 - `GetOwnerType() string` - 获取任务所有者类型
 - `GetState() TaskState` - 获取任务当前状态
 - `GetLevel() byte` - 获取任务层级
+- `GetStartTime() time.Time` - 启动时间快照（可在任意 goroutine 读）
+- `Elapsed() time.Duration` - 本轮已运行时长（未启动时为 0）
 - `GetParent() ITask` - 获取父任务
 - `GetTask() *Task` - 获取任务对象
 - `GetTaskPointer() uintptr` - 获取任务指针地址
@@ -1263,16 +1265,20 @@ GoTask 项目提供了完整的教学课程系统，位于 `lessons_CN/` 目录�
 
 3. **运行课程**：
    ```bash
-   # 运行指定课程
-   go test -v lessons_CN/lesson01_test.go
+   # 课程是交互式练习，默认不参与 go test ./...
+   go test -tags lesson -v ./lessons_CN/...
+
+   # 或只跑某一课
+   go test -tags lesson -v -run TestLesson01_1 ./lessons_CN/
    ```
+   还没完成的练习会显示为 `SKIP` 并给出提示：完成 TODO 后删掉那一行 `t.Skip` 再运行，即可验证自己的答案。
 
 ### 课程特色
 
 - **渐进式设计**：从简单到复杂，循序渐进
 - **实践导向**：每个课程都是可运行的完整程序
 - **全面覆盖**：涵盖GoTask框架的所有核心功能
-- **错误提示**：当用户未完成TODO时，会显示明确的错误信息
+- **练习状态清晰**：未完成的练习显示为跳过并给出提示，而不是让整个测试集失败
 
 ### 学习建议
 

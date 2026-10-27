@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -55,6 +57,7 @@ func (s *DataService07_1) Dispose() {
 // TestLesson07_1 测试Using方法 - 文件资源和关联关闭
 func TestLesson07_1(t *testing.T) {
 	t.Log("=== Lesson 7-1: Using方法 - 文件资源和关联关闭 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习Using方法的两种主要用法")
 	t.Log("")
 	t.Log("📝 Using 两种用法：")

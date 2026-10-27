@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -64,6 +66,7 @@ func (e *EventManager) Dispose() {
 // TestLesson09 Test event listening and callbacks
 func TestLesson09(t *testing.T) {
 	t.Log("=== Lesson 9: Event Listening and Callbacks ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn how to use event listening and callback mechanisms, understand task collaboration methods")
 	t.Log("Core Concepts: OnDescendantsStart/OnDescendantsDispose listen for child task events, OnStart/OnDispose set callbacks")
 	t.Log("Learning Content: Event-driven task coordination, loose coupling collaboration, task status monitoring")

@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -54,6 +56,7 @@ func (s *DataService07_1) Dispose() {
 // TestLesson07_1 Test Using method - file resources and associated cleanup
 func TestLesson07_1(t *testing.T) {
 	t.Log("=== Lesson 7-1: Using Method - File Resources and Associated Cleanup ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn the two main uses of the Using method")
 	t.Log("")
 	t.Log("📝 Using Two Uses:")

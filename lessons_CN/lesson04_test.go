@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -48,6 +50,7 @@ func (p *MessageProducer) Run() error {
 // TestLesson04 测试ChannelTask通道任务
 func TestLesson04(t *testing.T) {
 	t.Log("=== Lesson 4: ChannelTask通道任务 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("学习目标：理解ChannelTask的消息处理机制")
 	t.Log("任务：在MessageTask.Tick()中取消注释 t.ProcessMessage(msg) 并删除 _ = msg")
 	t.Log("如果不修改代码，测试将失败！")

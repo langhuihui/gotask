@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -64,6 +66,7 @@ func (e *EventManager) Dispose() {
 // TestLesson09 测试事件监听与回调
 func TestLesson09(t *testing.T) {
 	t.Log("=== Lesson 9: 事件监听与回调 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习如何使用事件监听和回调机制，了解任务间的协作方式")
 	t.Log("核心概念：OnDescendantsStart/OnDescendantsDispose监听子任务事件，OnStart/OnDispose设置回调")
 	t.Log("学习内容：事件驱动的任务协调、松耦合协作、任务状态监控")

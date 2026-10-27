@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -37,6 +39,7 @@ func (t *MyFirstTask) Dispose() {
 // TestLesson01 Test basic Task usage
 func TestLesson01_1(t *testing.T) {
 	t.Log("=== Lesson 1-1: Basic Task Usage ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn the most basic Task usage methods in GoTask framework")
 	t.Log("Key Concept: Tasks need to use AddTask to run (parent task drives child task execution)")
 
@@ -70,6 +73,7 @@ type MyFirstTask2 struct {
 // TestLesson01_2 Run method usage
 func TestLesson01_2(t *testing.T) {
 	t.Log("=== Lesson 1-2: Run Method Usage ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn inherited Task usage and Run method usage in GoTask framework")
 	t.Log("Key Concept: Run method automatically enters RUNNING state")
 
@@ -101,6 +105,7 @@ type MyFirstTask3 struct {
 // TestLesson01_3 Go method usage
 func TestLesson01_3(t *testing.T) {
 	t.Log("=== Lesson 1-3: Go Method Usage ===")
+	t.Skip("exercise: complete the TODO below (then delete this line) to check your work")
 	t.Log("Course Objective: Learn Go method usage in GoTask framework, understand difference between Go and Run methods")
 	t.Log("Key Concept: Go method automatically enters GOING state, runs in independent goroutine")
 

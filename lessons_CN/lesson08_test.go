@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -48,6 +50,7 @@ type RetryManager struct {
 // TestLesson08 测试重试机制
 func TestLesson08(t *testing.T) {
 	t.Log("=== Lesson 8: 重试机制 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习如何使用重试机制处理失败任务，了解错误恢复策略")
 	t.Log("核心概念：SetRetry方法设置重试策略，支持有限重试和无限重试")
 	t.Log("学习内容：重试间隔设置、重试状态监控、错误恢复策略")

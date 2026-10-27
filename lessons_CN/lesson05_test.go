@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -38,6 +40,7 @@ func (t *TimerTask) Tick(tick any) {
 // TestLesson05 测试TickTask定时任务
 func TestLesson05(t *testing.T) {
 	t.Log("=== Lesson 5: TickTask定时任务 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("学习目标：理解TickTask的定时执行机制")
 	t.Log("任务：在TimerTask.Start()中取消注释相关代码来实现定时任务逻辑")
 

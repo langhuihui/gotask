@@ -1,3 +1,5 @@
+//go:build lesson
+
 package lessons
 
 import (
@@ -40,6 +42,7 @@ func (s *SimpleService) Dispose() {
 // TestLesson06 测试RootManager作为WorkCollection的功能
 func TestLesson06(t *testing.T) {
 	t.Log("=== Lesson 6: RootManager作为WorkCollection的工作集合管理 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习如何使用RootManager作为WorkCollection管理服务集合")
 	t.Log("核心概念：WorkCollection提供集合操作功能，支持键值对管理、查找、遍历等")
 
@@ -143,6 +146,7 @@ func (c *CustomService) Dispose() {
 // TestLesson06_2 测试WorkCollection泛型集合功能
 func TestLesson06_2(t *testing.T) {
 	t.Log("=== Lesson 6.2: WorkCollection泛型集合功能测试 ===")
+	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
 	t.Log("课程目标：学习如何使用WorkCollection泛型集合管理不同类型的服务")
 	t.Log("核心概念：泛型类型安全、类型推断、集合操作方法")
 

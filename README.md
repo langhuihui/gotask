@@ -1018,6 +1018,8 @@ Tasks are started by calling the parent task's AddTask, which puts them in a que
 - `GetOwnerType() string` - Get task owner type
 - `GetState() TaskState` - Get task's current state
 - `GetLevel() byte` - Get task level
+- `GetStartTime() time.Time` - Start time snapshot, safe to read from any goroutine
+- `Elapsed() time.Duration` - Time since this attempt started (0 before start)
 - `GetParent() ITask` - Get parent task
 - `GetTask() *Task` - Get task object
 - `GetTaskPointer() uintptr` - Get task pointer address
@@ -1253,16 +1255,20 @@ The GoTask project provides a complete tutorial lesson system located in the `le
 
 3. **Run Lessons**:
    ```bash
-   # Run specific lesson
-   go test -v lessons/lesson01_test.go
+   # Lessons are interactive exercises, so they are excluded from the default test run
+   go test -tags lesson -v ./lessons/...
+
+   # Or a single lesson
+   go test -tags lesson -v -run TestLesson01_1 ./lessons/
    ```
+   Exercises you have not completed yet are reported as `SKIP` with a hint: finish the TODO, delete the `t.Skip` line, and run again to check your work.
 
 ### Course Features
 
 - **Progressive Design**: From simple to complex, step by step
 - **Practice-oriented**: Each lesson is a runnable complete program
 - **Comprehensive Coverage**: Covers all core features of the GoTask framework
-- **Error Hints**: Shows clear error messages when users haven't completed TODOs
+- **Clear Exercise State**: Unfinished exercises are skipped with a hint instead of failing the suite
 
 ### Learning Recommendations
 
