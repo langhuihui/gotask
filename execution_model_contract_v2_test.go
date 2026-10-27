@@ -213,3 +213,58 @@ func TestContract_WorkCollectionKeyIndependentOfTaskGetKey(t *testing.T) {
 	collection.Stop(ErrStopByUser)
 	_ = collection.WaitStopped()
 }
+
+// ---------- 契约 30：v2 的两种新失败原因参与故障判定与升级【V-A / V-E】 ----------
+
+// v2 引入了两个新的失败原因：ErrLegacyTaskGo（迁移守卫）与 ErrNotTickTask
+// （TickTask 族装错 handler）。它们必须被当成「失败」而不是正常生命周期结束，
+// 否则 FailurePolicy{Escalate} 的父任务对这两类问题完全失明——而这恰恰是最
+// 需要被上层感知的两类配置错误。
+func TestContract_V2ErrorsCountAsFailures(t *testing.T) {
+	for _, err := range []error{ErrLegacyTaskGo, ErrNotTickTask} {
+		if !isFailureReason(err) {
+			t.Fatalf("%v must count as a failure reason", err)
+		}
+	}
+	// 反向锚点：正常结束的原因不能被误判成失败。
+	for _, err := range []error{ErrTaskComplete, ErrStopByUser, ErrAutoStop, ErrExit} {
+		if isFailureReason(err) {
+			t.Fatalf("%v must NOT count as a failure reason", err)
+		}
+	}
+}
+
+// Escalation 全链路：legacy Go 任务失败 → 父任务以 ErrChildFailed 升级停止，
+// 兄弟任务被级联停掉。
+func TestContract_LegacyGoFailurePropagatesThroughEscalation(t *testing.T) {
+	var job Job
+	job.SetFailurePolicy(FailurePolicy{Escalate: true})
+	root.AddTask(&job)
+	if err := job.WaitStarted(); err != nil {
+		t.Fatal(err)
+	}
+
+	sibling := &blockingCtxRunTask{entered: make(chan struct{}), release: make(chan struct{})}
+	job.AddTask(sibling)
+	<-sibling.entered
+
+	job.AddTask(&legacyGoOnlyTask{})
+
+	select {
+	case <-job.Done():
+	case <-time.After(3 * time.Second):
+		t.Fatal("job did not escalate the legacy Go() failure")
+	}
+	err := job.StopReason()
+	if !errors.Is(err, ErrChildFailed) {
+		t.Fatalf("job stop reason = %v, want ErrChildFailed", err)
+	}
+	if !errors.Is(err, ErrLegacyTaskGo) {
+		t.Fatalf("job stop reason = %v, want the original ErrLegacyTaskGo joined in", err)
+	}
+	select {
+	case <-sibling.shutdown.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("sibling was not stopped by escalation")
+	}
+}

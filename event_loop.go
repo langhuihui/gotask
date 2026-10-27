@@ -9,36 +9,11 @@ import (
 	"sync/atomic"
 )
 
-// Singleton 单例模式（懒初始化容器）。
-//
-// Deprecated: 它是为「事件循环输入通道懒初始化」而生的通用抽象，但导出之后只有
-// 这一处用途，却要求使用者接受 atomic.Value + mutex + 类型断言的三层结构。
-// 事件循环内部已改用私有的 lazyChan；保留本类型纯粹为了不破坏既有引用（大版本
-// 之前不删导出符号）。新代码请直接用一个 sync.Once 包住自己的初始化。
-type Singleton[T comparable] struct {
-	instance atomic.Value
-	mux      sync.Mutex
-}
-
-func (s *Singleton[T]) Load() T {
-	return s.instance.Load().(T)
-}
-
-func (s *Singleton[T]) Get(newF func() T) T {
-	ch := s.instance.Load() //fast
-	if ch == nil {          // slow
-		s.mux.Lock()
-		defer s.mux.Unlock()
-		if ch = s.instance.Load(); ch == nil {
-			ch = newF()
-			s.instance.Store(ch)
-		}
-	}
-	return ch.(T)
-}
-
 // lazyChan 是事件循环输入通道的懒初始化容器：sync.Once 保证工厂只跑一次，且
 // 返回通道对后续调用者可见（Once 的内存屏障同时给出 happens-before）。
+//
+// v1 这里用的是导出的 Singleton[T]（atomic.Value + mutex + 类型断言的通用容器），
+// 但它全仓库只有这一处用途。v2 删掉那个导出符号，内部收敛成这个 5 行的结构。
 type lazyChan struct {
 	once sync.Once
 	ch   chan any
@@ -209,6 +184,16 @@ func (e *EventLoop) run(mt *Job) {
 					e.children = append(e.children, v)
 					mt.onChildStart(v)
 				} else {
+					// 首轮 start() 失败：子任务在 start() 内部已经 Stop 并走过
+					// onChildDispose→dispose（见 start 的错误路径），这里补上事件
+					// 循环欠它的最后一件事——按 FailurePolicy 升级。
+					//
+					// 缺了这一步，「启动阶段就失败」的所有原因对 Escalate 父任务
+					// 完全不可见：Start() 返回错误、Start 里 panic、以及 v2 的
+					// ErrLegacyTaskGo。它们与 Run 失败一样是失败，只是失败发生在
+					// 子任务从未进入 e.children 之前，走不到下面那个 case <-Done
+					// 分支的升级点。契约：C30。
+					mt.maybeEscalate(v, v.StopReason())
 					mt.removeChild(v)
 				}
 			}

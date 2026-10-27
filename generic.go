@@ -53,16 +53,6 @@ type RetryPolicy struct {
 	ShouldRetry      func(error) bool
 }
 
-// AnyTaskFunc is a compatibility adapter for legacy any-based task functions.
-//
-// Deprecated: use TaskFunc[T] instead.
-type AnyTaskFunc func(context.Context) (any, error)
-
-// Run executes the compatibility task function.
-func (fn AnyTaskFunc) Run(ctx context.Context) (any, error) {
-	return runGeneric(ctx, TaskFunc[any](fn))
-}
-
 // Run executes a typed task runner.
 func Run[T any](ctx context.Context, task TaskRunner[T]) (T, error) {
 	return runGeneric(ctx, task.Run)
@@ -240,22 +230,6 @@ func WithTimeout[T any](task TaskFunc[T], timeout time.Duration) TaskFunc[T] {
 // AsTaskFunc adapts a generic runner to TaskFunc.
 func AsTaskFunc[T any](task TaskRunner[T]) TaskFunc[T] {
 	return task.Run
-}
-
-// AdaptAnyTaskFunc adapts a legacy any-based function to TaskFunc[any].
-//
-// Deprecated: use TaskFunc[T] directly.
-func AdaptAnyTaskFunc(task AnyTaskFunc) TaskFunc[any] {
-	return TaskFunc[any](task)
-}
-
-// AsAnyTaskFunc adapts a typed task to a legacy any-based function.
-//
-// Deprecated: use TaskFunc[T] directly.
-func AsAnyTaskFunc[T any](task TaskFunc[T]) AnyTaskFunc {
-	return func(ctx context.Context) (any, error) {
-		return task.Run(ctx)
-	}
 }
 
 func runGeneric[T any](ctx context.Context, fn TaskFunc[T]) (value T, err error) {

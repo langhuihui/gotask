@@ -124,17 +124,3 @@ func Test_GenericWithRetryAndTimeout(t *testing.T) {
 	}
 }
 
-func Test_GenericCompatibilityAdapters(t *testing.T) {
-	typed := TaskFunc[int](func(context.Context) (int, error) { return 7, nil })
-	legacy := AsAnyTaskFunc(typed)
-	adapted := AdaptAnyTaskFunc(legacy)
-
-	value, err := adapted.Run(context.Background())
-	if err != nil {
-		t.Fatalf("adapter failed: %v", err)
-	}
-	got, ok := value.(int)
-	if !ok || got != 7 {
-		t.Fatalf("unexpected adapted value: %#v", value)
-	}
-}

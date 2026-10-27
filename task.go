@@ -14,7 +14,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-	"unsafe"
 
 	"github.com/langhuihui/gotask/v2/util"
 )
@@ -224,15 +223,6 @@ type (
 	}
 )
 
-// FromPointer 把 uintptr 还原成 *Task。
-//
-// Deprecated: uintptr 不是任务身份——它只在单进程单次运行内有效，跨重启、跨
-// 序列化都没有意义，绕过类型系统后还会让 GC 看不见这层引用。用 GetTaskID()
-// 作为稳定身份；确实需要对象时，请在调用方保存 ITask 本身。
-func FromPointer(pointer uintptr) *Task {
-	return (*Task)(unsafe.Pointer(pointer))
-}
-
 func (*Task) keepalive() bool {
 	return false
 }
@@ -375,20 +365,19 @@ func (task *Task) GetTask() *Task {
 	return task
 }
 
-// GetTaskPointer 返回任务的 uintptr 身份。
+// getKey 取 handler 自己实现的 GetKey()（集合类任务用它做 children 的字典键）。
 //
-// Deprecated: 用 GetTaskID()。uintptr 只在单进程单次运行内有效，跨重启或跨
-// 序列化没有意义，也会让 GC 看不见这层引用（dashboard 已改用任务 ID）。
-func (task *Task) GetTaskPointer() uintptr {
-	return uintptr(unsafe.Pointer(task))
-}
-
-func (task *Task) GetKey() uint32 {
-	return task.ID
-}
-
+// 兜底是任务 ID。v1 这里不需要兜底——那时 Task 上有个导出的 GetKey() uint32，
+// 所有嵌入 Task 的 handler 都靠它"继承"到一个返回 ID 的 GetKey，反射永远能命中。
+// v2 删掉那个同名不同义的导出方法（它返回的是 ID，不是集合键）之后，没有自定义
+// GetKey 的任务会让 MethodByName 返回零值、Call panic——这正是契约 C29 要守住的
+// 边界：**集合键来自 handler 的自定义 GetKey，缺省则是任务 ID**，与 Task 上是否
+// 有一个叫 GetKey 的方法无关。
 func (task *Task) getKey() any {
-	return reflect.ValueOf(task.handler).MethodByName("GetKey").Call(nil)[0].Interface()
+	if m := reflect.ValueOf(task.handler).MethodByName("GetKey"); m.IsValid() {
+		return m.Call(nil)[0].Interface()
+	}
+	return task.ID
 }
 
 func (task *Task) WaitStarted() error {

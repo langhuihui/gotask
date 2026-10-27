@@ -329,8 +329,10 @@ func (mt *Job) initContext(task *Task, handler ITask, opt ...any) {
 			task.retry = v
 		case *slog.Logger:
 			task.Logger = v
-		case int:
-			callDepth += v
+		// v2 起不再接受裸 int 当调用栈深度（v1 的 `case int: callDepth += v`）。
+		// 那个魔法参数让 `AddTask(t, 2)` 和 `AddTask(t, 0)` 在类型上完全等价却
+		// 语义不同，写错只能在运行时从 StartReason 的行号里发现。要偏移就用
+		// WithCallDepth（Phase 4 / F39 已提供，语义相同、类型可见）。
 		// 类型化 option（Phase 4 / F39）：与上面的裸值等价，见 task.go 的说明。
 		case contextOption:
 			task.parentCtx = v.ctx
