@@ -62,7 +62,6 @@ const (
 	TASK_STATE_STARTING
 	TASK_STATE_STARTED
 	TASK_STATE_RUNNING
-	TASK_STATE_GOING
 	TASK_STATE_DISPOSING
 	TASK_STATE_DISPOSED
 )
@@ -134,10 +133,21 @@ type (
 	TaskPreDisposal interface {
 		PreDispose()
 	}
-	TaskBlock interface {
+	// TaskRun 是任务的执行体：在独立 goroutine 中运行，返回即表示本轮结束。
+	// 返回 nil 触发框架自动 Stop(nil)；返回 error 触发 Stop(err) 并按重试配置处理。
+	//
+	// v2 起这是**唯一**的执行入口（v1 的 TaskGo 已删除，见
+	// docs/重构-执行模型v2-大版本v2设计.md §4.1）。Phase 2 把 Run 移出父事件
+	// 循环之后，原来的 TaskBlock 与 TaskGo 执行路径已经完全同构，剩下的差异
+	// 只有「同时实现两者时谁优先」这条从未写进文档的隐式规则。
+	TaskRun interface {
 		Run() error
 	}
-	TaskGo interface {
+	// legacyTaskGo 只服务于 v2 迁移守卫，不是公开契约：v1 的任务用 Go() 作为
+	// 执行体，v2 删掉 TaskGo 后这个方法名仍然编得过，只是不再被调度。若不管，
+	// 这类任务会「启动成功、永远不执行」——静默破坏比编译错误危险得多，所以
+	// start() 检测到「只实现 Go() 而没有 Run()」时直接以 ErrLegacyTaskGo 失败。
+	legacyTaskGo interface {
 		Go() error
 	}
 	RetryConfig struct {
@@ -950,8 +960,19 @@ func (task *Task) start() bool {
 		task.startNano.Store(now.UnixNano())
 		task.Debug("task start", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType(), "reason", task.StartReason)
 		task.setState(TASK_STATE_STARTING)
-		if v, ok := task.handler.(TaskStarter); ok {
-			err = v.Start()
+		// v2 迁移守卫（V-A）：先于用户代码判定执行体形态。v1 的任务可能只实现
+		// 了 Go()，而 v2 删掉 TaskGo 后这个方法名仍然编得过——不在这里拦住，
+		// 它会「STARTED 之后什么都不做」一直空转到被外部停止，既不报错也不留
+		// 日志。宁可显式失败，也不留静默空转。
+		if _, hasRun := task.handler.(TaskRun); !hasRun {
+			if _, legacy := task.handler.(legacyTaskGo); legacy {
+				err = ErrLegacyTaskGo
+			}
+		}
+		if err == nil {
+			if v, ok := task.handler.(TaskStarter); ok {
+				err = v.Start()
+			}
 		}
 		if err == nil {
 			task.setState(TASK_STATE_STARTED)
@@ -968,40 +989,33 @@ func (task *Task) start() bool {
 			task.drainStartHooks(startGen)
 			if task.IsStopped() {
 				err = task.StopReason()
-			} else {
-				if runHandler, ok := task.handler.(TaskBlock); ok {
-					task.setState(TASK_STATE_RUNNING)
-					task.Debug("task run", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
-					// Phase 2（控制与执行分离，见 docs/重构-执行模型v2-Phase2设计.md）：
-					// Run 移出父 Job 事件循环。执行 goroutine 与 TaskGo 完全同构
-					// （task.run：panic 恢复 + 返回即 Stop），完成/失败经 context
-					// 取消汇入子任务信号，由事件循环的信号分支驱动 dispose 与重试；
-					// start() 就此返回 true，父循环继续处理 Call、兄弟任务与其他
-					// 子任务信号。契约：TestContract_RunDoesNotOccupyParentEventLoop、
-					// TestContract_StopDuringBlockingRunIsPrompt。
-					//
-					// 旧实现在这里内联执行 Run：长 Run 堵住整个父循环，且失败重试
-					// 序列（dispose→退避→reset→再 start）也全部占着循环；运行中的
-					// 子任务还不在 e.children 里，循环与 initCases 的重启重建都看不
-					// 见它。另一个顺带修复的缺陷：Run panic 被本函数的 defer 恢复后，
-					// 下面的错误路径整个被展开跳过，任务既不 Stop 也不 dispose
-					// （WaitStopped 永久挂起，见 TestContract_RunPanicRecoveredAndRetried）。
-					// 本轮退出信号：重试的等待者要等它关闭才允许 reset()（见 armRetry）。
-					attemptDone := make(chan struct{})
-					task.setAttemptDone(attemptDone)
-					go task.run(runHandler.Run, attemptDone)
-					return true
-				}
+			} else if runHandler, ok := task.handler.(TaskRun); ok {
+				task.setState(TASK_STATE_RUNNING)
+				task.Debug("task run", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
+				// Phase 2（控制与执行分离，见 docs/重构-执行模型v2-Phase2设计.md）：
+				// Run 移出父 Job 事件循环。执行 goroutine 用 task.run（panic 恢复 +
+				// 返回即 Stop），完成/失败经 context 取消汇入子任务信号，由事件循环
+				// 的信号分支驱动 dispose 与重试；start() 就此返回 true，父循环继续
+				// 处理 Call、兄弟任务与其他子任务信号。契约：
+				// TestContract_RunDoesNotOccupyParentEventLoop、
+				// TestContract_StopDuringBlockingRunIsPrompt。
+				//
+				// 旧实现在这里内联执行 Run：长 Run 堵住整个父循环，且失败重试
+				// 序列（dispose→退避→reset→再 start）也全部占着循环；运行中的
+				// 子任务还不在 e.children 里，循环与 initCases 的重启重建都看不
+				// 见它。另一个顺带修复的缺陷：Run panic 被本函数的 defer 恢复后，
+				// 下面的错误路径整个被展开跳过，任务既不 Stop 也不 dispose
+				// （WaitStopped 永久挂起，见 TestContract_RunPanicRecoveredAndRetried）。
+				// 本轮退出信号：重试的等待者要等它关闭才允许 reset()（见 armRetry）。
+				attemptDone := make(chan struct{})
+				task.setAttemptDone(attemptDone)
+				go task.run(runHandler.Run, attemptDone)
+				return true
 			}
 		}
 		if err == nil {
-			if goHandler, ok := task.handler.(TaskGo); ok {
-				task.setState(TASK_STATE_GOING)
-				task.Debug("task go", "taskId", task.ID, "taskType", task.GetTaskType(), "ownerType", task.GetOwnerType())
-				attemptDone := make(chan struct{})
-				task.setAttemptDone(attemptDone)
-				go task.run(goHandler.Go, attemptDone)
-			}
+			// 纯生命周期任务：只实现了 Start/Stop/Tick，没有执行体（例如由
+			// ChannelTask.GetSignal 提供输入的定时任务）。启动即返回。
 			return true
 		} else {
 			// 显式落定 startup：出生即被停止的任务其 promise 挂在 Background 上

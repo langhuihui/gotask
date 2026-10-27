@@ -640,9 +640,13 @@ func (s *Sender) Dispose() {
 
 **Lifecycle Methods**:
 - `Start() error`: Initialization (optional).
-- `Run() error`: Execution (blocking, optional).
-- `Go() error`: Non-blocking execution (optional).
+- `Run() error`: Execution body, runs in its own goroutine (optional, and the only execution entry since v2).
 - `Dispose()`: Cleanup (optional).
+
+> **v2 breaking change**: `Go() error` has been removed. `Run()` is now the single
+> execution entry point (both used to run in a goroutine, so the split was pure
+> duplication). A task that still only implements `Go()` fails fast with
+> `ErrLegacyTaskGo` instead of silently doing nothing.
 
 **Code Example**:
 ```go

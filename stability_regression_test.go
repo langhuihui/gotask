@@ -126,37 +126,19 @@ func (t *stabilityRunTask) Run() error {
 	return errors.New("run failed")
 }
 
-type stabilityGoTask struct {
-	Task
-	attempts atomic.Int32
-}
-
-func (t *stabilityGoTask) Go() error {
-	if t.attempts.Add(1) >= 5 {
-		return ErrTaskComplete
+// TestFiniteRetryLimitsRunFailures 校验「重试次数受 MaxRetry 约束」。
+//
+// v1 里这条回归测试有 Run / Go 两个 subtest，因为两条执行路径各自独立。
+// v2 合并执行入口后只剩 Run（TaskGo 已删除，见
+// docs/重构-执行模型v2-大版本v2设计.md §4.1），Go 那个 subtest 失去被测对象。
+func TestFiniteRetryLimitsRunFailures(t *testing.T) {
+	task := &stabilityRunTask{}
+	task.SetRetry(2, 0)
+	root.AddTask(task)
+	waitForAttempts(t, task.attempts.Load)
+	if got := task.attempts.Load(); got != 3 {
+		t.Fatalf("expected initial attempt and two retries, got %d attempts", got)
 	}
-	return errors.New("go failed")
-}
-
-func TestFiniteRetryLimitsRunAndGoFailures(t *testing.T) {
-	t.Run("Run", func(t *testing.T) {
-		task := &stabilityRunTask{}
-		task.SetRetry(2, 0)
-		root.AddTask(task)
-		waitForAttempts(t, task.attempts.Load)
-		if got := task.attempts.Load(); got != 3 {
-			t.Fatalf("expected initial attempt and two retries, got %d attempts", got)
-		}
-	})
-	t.Run("Go", func(t *testing.T) {
-		task := &stabilityGoTask{}
-		task.SetRetry(2, 0)
-		root.AddTask(task)
-		waitForAttempts(t, task.attempts.Load)
-		if got := task.attempts.Load(); got != 3 {
-			t.Fatalf("expected initial attempt and two retries, got %d attempts", got)
-		}
-	})
 }
 
 func TestEventLoopRecoversStringPanic(t *testing.T) {

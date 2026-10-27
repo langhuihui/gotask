@@ -96,8 +96,6 @@ func TestContract_TickTaskUnboundHandlerFails(t *testing.T) {
 // ---------- 契约 26：AsyncTickTask 未绑定 handler 时返回错误而非 panic【V-E】 ----------
 
 func TestContract_AsyncTickTaskUnboundHandlerFails(t *testing.T) {
-	// AsyncTickTask 的执行入口在 v2 前叫 Go()、v2 后叫 Run()（V-A 合并），
-	// 两者都要经过「handler 必须实现 ITickTask」这道检查。
 	at := &AsyncTickTask{}
 
 	var (
@@ -106,7 +104,7 @@ func TestContract_AsyncTickTaskUnboundHandlerFails(t *testing.T) {
 	)
 	func() {
 		defer func() { panicked = recover() }()
-		err = at.Go()
+		err = at.Run()
 	}()
 
 	if panicked != nil {

@@ -43,7 +43,7 @@ func TestContract_AsTaskBlockRunsGenericFunction(t *testing.T) {
 	job.AddTask(block)
 	<-receivedC
 
-	// 函数运行期间父循环仍响应（桥接后它就是普通的 TaskBlock）。
+	// 函数运行期间父循环仍响应（桥接后它就是普通的 TaskRun）。
 	select {
 	case <-callWithin(&job):
 	case <-time.After(2 * time.Second):

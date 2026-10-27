@@ -30,11 +30,15 @@ type benchRunTask struct {
 func (t *benchRunTask) Run() error { return nil }
 
 // benchGoTask 以独立 goroutine 等待停止信号，不占用事件循环。
+//
+// v1 里它实现 Go()，用来对比「TaskGo 与 TaskBlock 的启动/停止开销」；v2 合并
+// 执行入口后两者同构，实现改名 Run()，基准的对比对象随之消失（见
+// docs/重构-执行模型v2-大版本v2设计.md §4.1 与 §8 A5）。
 type benchGoTask struct {
 	Task
 }
 
-func (t *benchGoTask) Go() error {
+func (t *benchGoTask) Run() error {
 	<-t.Done()
 	return t.StopReason()
 }

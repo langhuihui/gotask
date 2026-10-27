@@ -11,7 +11,7 @@ func findActiveChild(job task.IJob) task.ITask {
 	var found task.ITask
 	job.RangeSubTask(func(child task.ITask) bool {
 		switch child.GetState() {
-		case task.TASK_STATE_RUNNING, task.TASK_STATE_GOING, task.TASK_STATE_DISPOSING:
+		case task.TASK_STATE_RUNNING, task.TASK_STATE_DISPOSING:
 			found = child
 			return false
 		}
@@ -169,8 +169,6 @@ func TaskStateToString(state task.TaskState) string {
 		return "STARTED"
 	case task.TASK_STATE_RUNNING:
 		return "RUNNING"
-	case task.TASK_STATE_GOING:
-		return "GOING"
 	case task.TASK_STATE_DISPOSING:
 		return "DISPOSING"
 	case task.TASK_STATE_DISPOSED:

@@ -91,33 +91,36 @@ func TestLesson01_2(t *testing.T) {
 }
 
 // MyFirstTask3 第三个任务示例
+//
+// v2 起 Go() 不再是任务的执行入口：TaskGo 已删除，Run 是唯一入口（见
+// docs/重构-执行模型v2-大版本v2设计.md §4.1）。把它写成 Go() 不会编译报错，
+// 但框架会以 ErrLegacyTaskGo 明确失败——而不是让任务「启动成功却永远不执行」。
 type MyFirstTask3 struct {
 	MyFirstTask
 }
 
-// Go 任务运行方法, 使用Go方法实现异步执行,TODO: 取消注释来完成任务运行
-// func (t *MyFirstTask3) Go() error {
-// 	t.Info("任务正在协程中运行", "name", t.Name())
-// 	time.Sleep(2 * time.Second)
-// 	return nil
-// }
+// Go 故意沿用 v1 的方法名，用来观察 v2 的迁移守卫。
+func (t *MyFirstTask3) Go() error {
+	t.Info("这段代码在 v2 中不会被执行", "name", t.Name())
+	return nil
+}
 
-// TestLesson01_3 Go方法的使用
+// TestLesson01_3 v2 迁移守卫：Go() 不再是执行入口
 func TestLesson01_3(t *testing.T) {
-	t.Log("=== Lesson 1-3: Go方法的使用 ===")
-	t.Skip("练习：完成下方 TODO（然后删除本行）即可验证本课")
-	t.Log("课程目标：学习GoTask框架中Go方法的使用，理解Go方法与Run方法的区别")
-	t.Log("关键概念：Go方法会自动进入GOING状态，在独立协程中运行")
+	t.Log("=== Lesson 1-3: Go() 不再是任务执行入口（v2） ===")
+	t.Skip("练习：删除上方 Skip 行即可验证本课")
+	t.Log("课程目标：理解 v2 为什么删除 TaskGo，以及迁移守卫如何保护你")
+	t.Log("关键概念：只实现 Go() 的任务会以 ErrLegacyTaskGo 停止，而不是静默空转")
 
 	// 创建第三个任务
 	myTask3 := &MyFirstTask3{MyFirstTask: MyFirstTask{T: t}}
 	root.AddTask(myTask3)
 
-	time.Sleep(1 * time.Second) // 等待任务启动
+	time.Sleep(1 * time.Second) // 等待迁移守卫触发
 
-	if myTask3.GetState() == task.TASK_STATE_GOING {
-		t.Log("Lesson 1-3 测试通过：Go方法的使用")
+	if myTask3.StopReasonIs(task.ErrLegacyTaskGo) {
+		t.Log("Lesson 1-3 测试通过：迁移守卫捕获了遗留的 Go() 任务")
 		return
 	}
-	t.Errorf("课程未通过")
+	t.Errorf("课程未通过：期望 ErrLegacyTaskGo，实际 %v", myTask3.StopReason())
 }

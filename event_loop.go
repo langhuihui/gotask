@@ -107,7 +107,7 @@ func (e *EventLoop) active(mt *Job) {
 func (e *EventLoop) add(mt *Job, sub any) (err error) {
 	shouldActive := true
 	switch sub.(type) {
-	case TaskStarter, TaskBlock, TaskGo:
+	case TaskStarter, TaskRun:
 	case IJob:
 		shouldActive = false
 	}

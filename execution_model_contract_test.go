@@ -54,19 +54,6 @@ func (t *blockingRunTask) Run() error {
 	return nil
 }
 
-// blockingGoTask：TaskGo，在独立 goroutine 里阻塞直到 release 关闭。
-type blockingGoTask struct {
-	Task
-	entered chan struct{}
-	release chan struct{}
-}
-
-func (t *blockingGoTask) Go() error {
-	close(t.entered)
-	<-t.release
-	return nil
-}
-
 // blockingStartTask：Start 阻塞直到 release 关闭。
 type blockingStartTask struct {
 	Task
@@ -138,7 +125,9 @@ func TestContract_RunDoesNotOccupyParentEventLoop(t *testing.T) {
 	}
 
 	// 兄弟任务在 Run 执行期间也能及时启动。
-	sibling := &blockingGoTask{entered: make(chan struct{}), release: make(chan struct{})}
+	// v2：原 C2（「TaskGo 不占用父事件循环」）已随 TaskGo 删除并入本条——
+	// v2 起 Run 是唯一执行入口，不存在第二条需要单独验证的执行路径。
+	sibling := &blockingRunTask{entered: make(chan struct{}), release: make(chan struct{})}
 	job.AddTask(sibling)
 	select {
 	case <-sibling.entered:
@@ -150,28 +139,11 @@ func TestContract_RunDoesNotOccupyParentEventLoop(t *testing.T) {
 	_ = job.WaitStopped() // 子任务跑完后 Job 自动停止
 }
 
-// ---------- 契约 2：Go 不占用父事件循环【保持】 ----------
-
-func TestContract_GoRunsOffParentEventLoop(t *testing.T) {
-	var job Job
-	root.AddTask(&job)
-	if err := job.WaitStarted(); err != nil {
-		t.Fatal(err)
-	}
-	blocker := &blockingGoTask{entered: make(chan struct{}), release: make(chan struct{})}
-	job.AddTask(blocker)
-	<-blocker.entered
-
-	// 当前语义：TaskGo 跑在独立 goroutine 上，不堵同 Job 的 Call。
-	callDone := callWithin(&job)
-	select {
-	case <-callDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Call blocked by a Go task: TaskGo must run off the event loop")
-	}
-	close(blocker.release)
-	_ = job.WaitStopped()
-}
+// ---------- 契约 2：已删除【v2：TaskGo 不存在，语义并入 C1】 ----------
+//
+// v1 的 C2 验证「TaskGo 不占用父事件循环」。v2 删除 TaskGo 之后这条契约失去
+// 被测对象——Run 是唯一执行入口，其循环外执行由 C1 覆盖。编号保留（不重排），
+// 以免既有文档里的 C 编号指向漂移。
 
 // ---------- 契约 3：Start 占用父事件循环【可改变：Phase 2 评估】 ----------
 
@@ -306,9 +278,9 @@ func TestContract_JobAutoStopsWhenChildrenComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	const childCount = 4
-	children := make([]*blockingGoTask, childCount)
+	children := make([]*blockingRunTask, childCount)
 	for j := range children {
-		children[j] = &blockingGoTask{entered: make(chan struct{}), release: make(chan struct{})}
+		children[j] = &blockingRunTask{entered: make(chan struct{}), release: make(chan struct{})}
 		job.AddTask(children[j])
 		<-children[j].entered
 	}
