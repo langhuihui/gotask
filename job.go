@@ -331,6 +331,17 @@ func (mt *Job) initContext(task *Task, handler ITask, opt ...any) {
 			task.Logger = v
 		case int:
 			callDepth += v
+		// 类型化 option（Phase 4 / F39）：与上面的裸值等价，见 task.go 的说明。
+		case contextOption:
+			task.parentCtx = v.ctx
+		case descriptionOption:
+			task.SetDescriptions(v.description)
+		case retryOption:
+			task.retry = v.retry
+		case loggerOption:
+			task.Logger = v.logger
+		case callDepthOption:
+			callDepth += v.depth
 		}
 	}
 	_, file, line, ok := runtime.Caller(callDepth)

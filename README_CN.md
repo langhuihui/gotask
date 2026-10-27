@@ -251,11 +251,37 @@ retried := task.WithRetry(source, task.RetryPolicy{
 timed := task.WithTimeout(retried, 2*time.Second)
 ```
 
+#### 边界在哪里：纯函数编排 vs 生命周期
+
+泛型层是**纯函数编排**：没有父子、没有事件循环、没有 Start/Stop/Dispose 钩子、没有可观测的
+任务状态。一切都是 `(T, error)` 加上你传入的 `context.Context`——重试、超时、取消能做到什么
+程度，取决于函数是否尊重 context。
+
+需要生命周期时用任务树（`Task`/`Job`）：谁在跑、跑了几轮、退避怎么安排（Phase 3 起不在事件
+循环上等）、停止时谁先谁后。
+
+两者通过一个单向适配器会合——泛型函数可以挂进任务树：
+
+```go
+block := task.AsTaskBlock(task.TaskFunc[int](func(ctx context.Context) (int, error) {
+    return fetch(ctx) // 尊重 ctx，否则父任务停不下来
+}))
+block.SetRetry(3, time.Second)   // 任务树的重试：不占循环，且可取消
+job.AddTask(block)
+```
+
+反向适配（Task → TaskFunc）刻意不提供：那会让「函数编排」看起来能管理子任务。
+
+注意任务树**没有**单轮 attempt 超时，这是有意的——`Run` 拿到的是本轮 context，在调用方用
+`context.WithTimeoutCause` 比加一个框架开关更灵活。
+
 #### 兼容策略与弃用计划
 
 - 现有 `Task`、`Job`、`RootManager`、通道任务、重试和生命周期 API 保持不变。
 - 新增泛型 API 为增量能力，可逐步替换编排代码中原有的 `any` 风格辅助逻辑。
 - `AnyTaskFunc`、`AdaptAnyTaskFunc`、`AsAnyTaskFunc` 作为过渡适配层保留，并标记为 deprecated。
+- `FromPointer` / `GetTaskPointer` 标记为 deprecated，改用 `GetTaskID()`；`Singleton[T]` 标记为 deprecated（事件循环已改用私有懒初始化通道）。
+- `AddTask` / `RunTask` 除既有的裸值外，新增类型化 option：`WithContext`、`WithLogger`、`WithDescription`、`WithRetryConfig`、`WithCallDepth`。
 - 本次 PR 不引入 breaking change，现有任务树代码可继续按原方式运行。
 
 #### 迁移示例

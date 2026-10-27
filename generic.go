@@ -1,3 +1,17 @@
+// 泛型编排层：纯函数组合（Then/Map/Chain/Parallel/ParallelMap/WithRetry/
+// WithTimeout）。它**不涉及生命周期**——没有父子、没有事件循环、没有
+// Start/Stop/Dispose 钩子、没有任务树里的可观测状态；所有中断都靠传入的
+// context，所有返回值都是 (T, error)。
+//
+// 与任务树的分工（Phase 4 设计 §3.3）：
+//
+//   - 需要「谁在跑、跑了几轮、失败后怎么退避、停止时谁先谁后」用任务树
+//     （Task/Job）：重试退避在循环外、可取消、有计数与描述可观测；
+//   - 需要在一次调用内组合若干函数并汇聚结果，用泛型编排；
+//   - 两者用 AsTaskBlock 单向桥接：函数进任务树；反向适配刻意不提供。
+//
+// 共享的重试语义：终态原因判定（isTerminalStopReason）与指数退避公式
+// （retryDelayFor）由两层共用，避免同一个配置算出两种退避。
 package task
 
 import (
@@ -276,19 +290,7 @@ func shouldRetryGeneric(ctx context.Context, err error, policy RetryPolicy, retr
 }
 
 func genericRetryDelay(retries int, policy RetryPolicy) time.Duration {
-	delay := policy.RetryInterval
-	if retries > 1 && policy.RetryInterval > 0 {
-		exponent := retries - 1
-		if exponent < 30 {
-			delay = policy.RetryInterval * time.Duration(1<<exponent)
-		} else {
-			delay = policy.RetryInterval * time.Duration(1<<30)
-		}
-	}
-	if policy.MaxRetryInterval > 0 && delay > policy.MaxRetryInterval {
-		return policy.MaxRetryInterval
-	}
-	return delay
+	return retryDelayFor(retries, policy.RetryInterval, policy.MaxRetryInterval)
 }
 
 func sleepContext(ctx context.Context, delay time.Duration) error {
@@ -303,4 +305,49 @@ func sleepContext(ctx context.Context, delay time.Duration) error {
 	case <-timer.C:
 		return nil
 	}
+}
+
+// ---------- 与任务树的桥接（Phase 4 / F30） ----------
+
+// GenericTask 是一个把泛型函数挂进任务树的任务：它内嵌 Task（于是满足 ITask
+// 的全部要求），同时实现 TaskBlock，`Job.AddTask`/`Job.RunTask` 可以直接接收它。
+//
+// 生命周期语义与手写的 TaskBlock 完全一致：Start 成功后 Run 在独立 goroutine
+// 上执行（Phase 2），函数返回 nil 视为本轮完成（ErrTaskComplete），返回错误即
+// 本轮停止原因；父任务停止时 context 被取消，函数应当尊重它——这也是泛型
+// 函数唯一的「被中断」通道（Go 无法强杀 goroutine）。
+type GenericTask struct {
+	Task
+	fn func(context.Context) error
+}
+
+// Run 执行被包装的泛型函数，context 取本轮 attempt 的 Task.Context。
+func (g *GenericTask) Run() error {
+	return g.fn(g.Context)
+}
+
+// AsTaskBlock 把泛型函数包装成可挂进任务树的 TaskBlock。
+//
+// 返回值是 *GenericTask（而不只是 TaskBlock 接口）：调用方拿到的对象既能在
+// 任务树里用 SetRetry/SetDisposeTimeout 等生命周期配置，也能在外部观察状态。
+//
+// 典型用法：
+//
+//	blk := task.AsTaskBlock(task.TaskFunc[int](func(ctx context.Context) (int, error) {
+//		return fetch(ctx) // 尊重 ctx，父任务停止时才停得下来
+//	}))
+//	blk.SetRetry(3, time.Second)
+//	job.AddTask(blk)
+//
+// 反向适配（Task → TaskFunc）刻意不提供：那会把整个生命周期塞进一个闭包，
+// 让「函数编排」看起来像能管理子任务，收益远低于代价。
+func AsTaskBlock[T any](fn TaskFunc[T]) *GenericTask {
+	if fn == nil {
+		return &GenericTask{fn: func(context.Context) error { return ErrTaskComplete }}
+	}
+	return &GenericTask{fn: func(ctx context.Context) error {
+		// runGeneric 负责 panic 包装（ThrowPanic=false 时并上 ErrPanic）。
+		_, err := runGeneric(ctx, fn)
+		return err
+	}}
 }

@@ -251,11 +251,39 @@ retried := task.WithRetry(source, task.RetryPolicy{
 timed := task.WithTimeout(retried, 2*time.Second)
 ```
 
+#### Where the boundary is: pure functions vs lifecycle
+
+The generic layer is **pure function orchestration**: no parent/child, no event loop, no
+Start/Stop/Dispose hooks, no observable task state. Everything is `(T, error)` plus the
+`context.Context` you pass in — so retry, timeout and cancellation only work as far as the
+function respects the context.
+
+Use the task tree (`Task`/`Job`) when you need lifecycle: who is running, how many attempts
+have run, how backoff is scheduled (off the event loop since Phase 3), what stops before what.
+
+The two meet through one adapter — a generic function can be mounted into the tree:
+
+```go
+block := task.AsTaskBlock(task.TaskFunc[int](func(ctx context.Context) (int, error) {
+    return fetch(ctx) // respect ctx, otherwise the parent cannot stop it
+}))
+block.SetRetry(3, time.Second)   // the tree's retry: off-loop and cancellable
+job.AddTask(block)
+```
+
+The reverse adapter (Task → TaskFunc) is intentionally not provided: it would pretend that
+function orchestration can manage child tasks.
+
+Note that the task tree has no per-attempt timeout on purpose — `Run` receives the attempt
+context, so `context.WithTimeoutCause` at the call site is more flexible than a framework knob.
+
 #### Compatibility and deprecation plan
 
 - Existing `Task`, `Job`, `RootManager`, channel-task, retry, and lifecycle APIs remain available unchanged.
 - The generic APIs are additive and can be adopted incrementally in orchestration code that previously used `any`-style helpers.
 - `AnyTaskFunc`, `AdaptAnyTaskFunc`, and `AsAnyTaskFunc` are provided as transition helpers and marked deprecated.
+- `FromPointer` / `GetTaskPointer` are deprecated in favor of `GetTaskID()`; `Singleton[T]` is deprecated (the event loop now uses a private lazy channel).
+- `AddTask` / `RunTask` accept typed options (`WithContext`, `WithLogger`, `WithDescription`, `WithRetryConfig`, `WithCallDepth`) alongside the legacy raw values.
 - No breaking changes are required in this PR; existing task-tree code keeps working as-is.
 
 #### Migration example

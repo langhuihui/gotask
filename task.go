@@ -205,6 +205,11 @@ type (
 	}
 )
 
+// FromPointer 把 uintptr 还原成 *Task。
+//
+// Deprecated: uintptr 不是任务身份——它只在单进程单次运行内有效，跨重启、跨
+// 序列化都没有意义，绕过类型系统后还会让 GC 看不见这层引用。用 GetTaskID()
+// 作为稳定身份；确实需要对象时，请在调用方保存 ITask 本身。
 func FromPointer(pointer uintptr) *Task {
 	return (*Task)(unsafe.Pointer(pointer))
 }
@@ -280,6 +285,42 @@ func (task *Task) SetShouldRetry(shouldRetry func(error) bool) {
 	task.retry.ShouldRetry = shouldRetry
 }
 
+// ---------- 类型化 option（Phase 4 / F39） ----------
+//
+// AddTask/RunTask 的签名是 opt ...any——为了向后兼容不改，历史上是直接传裸值：
+// context.Context、*slog.Logger、Description、RetryConfig，以及一个 int 表示
+// 「额外向上跳几层调用栈」。裸 int 尤其容易写错：数字不对不会报错，只会让
+// StartReason 指向错误的调用点。
+//
+// 下面这组 WithXxx 是对应的具名形式，与裸值完全等价；裸类型继续识别，其中 int
+// 形式自本版起降级为「内部用法」（新代码请用 WithCallDepth）。
+//
+// 命名偏差记录：重试配置用 WithRetryConfig 而非设计稿里的 WithRetry——后者已被
+// 泛型编排层的 `WithRetry[T](TaskFunc[T], RetryPolicy)` 占用（同包不能重载）。
+type contextOption struct{ ctx context.Context }
+type loggerOption struct{ logger *slog.Logger }
+type descriptionOption struct{ description Description }
+type retryOption struct{ retry RetryConfig }
+type callDepthOption struct{ depth int }
+
+// WithContext 指定任务的父 context（默认继承父任务的）。
+func WithContext(ctx context.Context) contextOption { return contextOption{ctx: ctx} }
+
+// WithLogger 指定任务使用的 logger（默认继承父任务的）。
+func WithLogger(logger *slog.Logger) loggerOption { return loggerOption{logger: logger} }
+
+// WithDescription 为任务初始 description（等价的裸写法是直接传 Description）。
+func WithDescription(description Description) descriptionOption {
+	return descriptionOption{description: description}
+}
+
+// WithRetryConfig 为任务指定初始重试配置（等价的裸写法是直接传 RetryConfig）。
+func WithRetryConfig(retry RetryConfig) retryOption { return retryOption{retry: retry} }
+
+// WithCallDepth 在默认调用栈深度上再上跳 depth 层，用于让 StartReason 记录
+// 真正的调用方（封装了 AddTask 的辅助函数里用得到）。
+func WithCallDepth(depth int) callDepthOption { return callDepthOption{depth: depth} }
+
 // SetDisposeTimeout 设置销毁看门狗的时限；0（默认）表示关闭。
 //
 // 语义是「检测」而不是「中断」：Go 无法杀死一个正在执行的 Dispose/PreDispose/
@@ -315,6 +356,10 @@ func (task *Task) GetTask() *Task {
 	return task
 }
 
+// GetTaskPointer 返回任务的 uintptr 身份。
+//
+// Deprecated: 用 GetTaskID()。uintptr 只在单进程单次运行内有效，跨重启或跨
+// 序列化没有意义，也会让 GC 看不见这层引用（dashboard 已改用任务 ID）。
 func (task *Task) GetTaskPointer() uintptr {
 	return uintptr(unsafe.Pointer(task))
 }
@@ -667,6 +712,28 @@ func (task *Task) GetSignal() any {
 // generic 侧的 shouldRetryGeneric 还额外排除 ErrTimeout，两套重试语义漂移
 // （docs/重构-执行模型v2-Phase3设计.md F22）。统一后 ErrTimeout 一律不重试，
 // 与 generic.WithTimeout 的语义一致。
+// retryDelayFor 计算第 attempt 次重试的指数退避：interval * 2^(attempt-1)，
+// 上限为 maxInterval（<= 0 表示不封顶）。attempt <= 1 直接返回 interval。
+//
+// 任务树（retryDecision）与泛型编排（genericRetryDelay）共用这一份公式。
+// 在此之前两处各写一遍、边界还不一致：任务树只在 attempt > 1 时才封顶，
+// 于是「RetryInterval=10s + MaxRetryInterval=1s」在任务树上首轮要白等 10s，
+// 而泛型侧始终封顶（Phase 4 / F31）。
+func retryDelayFor(attempt int, interval, maxInterval time.Duration) time.Duration {
+	delay := interval
+	if attempt > 1 {
+		exponent := attempt - 1
+		if exponent > 30 { // 1<<30 已是 10^9 倍，超过就是溢出而不是退避
+			exponent = 30
+		}
+		delay = interval * time.Duration(1<<exponent)
+	}
+	if maxInterval > 0 && delay > maxInterval {
+		return maxInterval
+	}
+	return delay
+}
+
 func isTerminalStopReason(err error) bool {
 	return errors.Is(err, ErrTaskComplete) || errors.Is(err, ErrExit) ||
 		errors.Is(err, ErrStopByUser) || errors.Is(err, ErrTimeout)
@@ -706,24 +773,7 @@ func (task *Task) retryDecision(err error) (delay time.Duration, ok bool) {
 			return 0, true
 		}
 
-		// Calculate exponential backoff delay: baseInterval * 2^(retryCount-1)
-		retryDelay := task.retry.RetryInterval
-		if task.retry.RetryCount > 1 {
-			// Calculate 2^(retryCount-1) using bit shift for better performance
-			exponent := task.retry.RetryCount - 1
-			if exponent < 30 { // Avoid overflow for very large retry counts
-				retryDelay = task.retry.RetryInterval * time.Duration(1<<exponent)
-			} else {
-				// For very large retry counts, use maximum allowed duration
-				retryDelay = task.retry.RetryInterval * time.Duration(1<<30)
-			}
-
-			// Apply maximum delay limit if set
-			if task.retry.MaxRetryInterval > 0 && retryDelay > task.retry.MaxRetryInterval {
-				retryDelay = task.retry.MaxRetryInterval
-			}
-		}
-
+		retryDelay := retryDelayFor(task.retry.RetryCount, task.retry.RetryInterval, task.retry.MaxRetryInterval)
 		task.SetDescription("retryDelay", retryDelay.String())
 		// 退避起点是本轮 attempt 的开始时间（不是失败时刻），已经执行掉的时间
 		// 要从退避里扣掉——与 Phase 3 之前的内联等待完全一致。

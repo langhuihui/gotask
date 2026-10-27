@@ -9,7 +9,12 @@ import (
 	"sync/atomic"
 )
 
-// Singleton 单例模式
+// Singleton 单例模式（懒初始化容器）。
+//
+// Deprecated: 它是为「事件循环输入通道懒初始化」而生的通用抽象，但导出之后只有
+// 这一处用途，却要求使用者接受 atomic.Value + mutex + 类型断言的三层结构。
+// 事件循环内部已改用私有的 lazyChan；保留本类型纯粹为了不破坏既有引用（大版本
+// 之前不删导出符号）。新代码请直接用一个 sync.Once 包住自己的初始化。
 type Singleton[T comparable] struct {
 	instance atomic.Value
 	mux      sync.Mutex
@@ -32,11 +37,23 @@ func (s *Singleton[T]) Get(newF func() T) T {
 	return ch.(T)
 }
 
+// lazyChan 是事件循环输入通道的懒初始化容器：sync.Once 保证工厂只跑一次，且
+// 返回通道对后续调用者可见（Once 的内存屏障同时给出 happens-before）。
+type lazyChan struct {
+	once sync.Once
+	ch   chan any
+}
+
+func (l *lazyChan) get(newF func() chan any) chan any {
+	l.once.Do(func() { l.ch = newF() })
+	return l.ch
+}
+
 // EventLoop 事件循环
 type EventLoop struct {
 	cases    []reflect.SelectCase
 	children []ITask
-	addSub   Singleton[chan any]
+	addSub   lazyChan
 	running  atomic.Bool
 	// bufferSize allows configuring the channel capacity; zero uses the default.
 	bufferSize int
@@ -66,7 +83,7 @@ func (e *EventLoop) getInput() chan any {
 	if size <= 0 {
 		size = DefaultEventLoopBufferSize
 	}
-	return e.addSub.Get(func() chan any {
+	return e.addSub.get(func() chan any {
 		return make(chan any, size)
 	})
 }

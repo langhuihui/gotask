@@ -89,7 +89,7 @@
 
 1. **类型化 option**（修 F39，与 `opt ...any` 共存）：
    ```go
-   task.WithContext(ctx) / WithLogger(l) / WithDescription(d) / WithRetry(cfg) / WithCallDepth(n)
+   task.WithContext(ctx) / WithLogger(l) / WithDescription(d) / WithRetryConfig(cfg) / WithCallDepth(n)
    ```
    每个返回私有 option 类型，`initContext` 的 switch 增加分支；旧写法（裸 `context.Context`/`RetryConfig`/`*slog.Logger`/`Description`/`int`）继续识别，`int` 在文档里标为内部用法。`AddTask`/`RunTask` 签名不变。
 2. **弃用标记**（不删）：`FromPointer`/`GetTaskPointer` 加 `Deprecated:`（指向 `GetTaskID`）；`AdaptAnyTaskFunc`/`AsAnyTaskFunc` 已标，保持。
@@ -144,9 +144,12 @@
 - **Q3 泛型边界 → 去重 + 桥接（推荐项）**。
 - **Q4 类型化配置 → 新增 `WithXxx` 共存（推荐项）**。
 
-**实施进度**：4A、4B 已落地，见 `docs/重构-执行模型v2.md` §6（含 C21 契约、环境限制记录）；4C、4D 待做。
+**实施进度**：四项全部落地，见 `docs/重构-执行模型v2.md` §6（含 C21–C24 契约、环境限制记录与基准对比）。
 
 **实施中偏离设计的两处（记录）**：
 
 1. §3.1 原计划只给 L1-1 加 skip——实测「15/17 失败」里 13 个都是 TODO 练习，于是统一处理为 14 个 skip（含 L2-2），并额外补了 `doc.go`（否则全文件被 build 约束排除会让包不存在）。
 2. §3.2.4 原计划把 dashboard 的 `go` 指令降到 1.23 以换取本机构建——不可行：依赖 `ncruces/go-sqlite3@v0.29.0` 自身要求 Go ≥1.24，故 **go.mod 保持原样**，dashboard 的验收退化为「临时 module 编译校验 API 形状 + gofmt 解析校验」，并记录环境限制。
+3. §3.4.1 原计划 `WithRetry(cfg RetryConfig)`——该名字已被泛型编排层的 `WithRetry[T](TaskFunc[T], RetryPolicy)` 占用（同包不能重载），落地为 **`WithRetryConfig`**；其余四个 `WithXxx` 按设计。
+4. §3.3.1 抽 `retryDelayFor` 时发现两侧的上限边界本就不一致（任务树只在 `RetryCount > 1` 时封顶），统一为「始终封顶」——这是**行为修复**而非纯重构，由 C23 锁定（旧语义实测 2s，新语义 100ms）。
+5. §3.3.2 的 `AsTaskBlock` 返回类型从 `TaskBlock` 收紧为 `*GenericTask`：只返回接口的话调用方没法 `SetRetry`/`SetDisposeTimeout`，也就用不上任务树的能力。
