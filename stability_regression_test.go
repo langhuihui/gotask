@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/langhuihui/gotask/util"
+	"github.com/langhuihui/gotask/v2/util"
 )
 
 func waitForTaskStopped(t *testing.T, task ITask) error {

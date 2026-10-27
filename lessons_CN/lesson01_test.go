@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	task "github.com/langhuihui/gotask"
+	task "github.com/langhuihui/gotask/v2"
 )
 
 // 使用RootManager作为根任务管理器

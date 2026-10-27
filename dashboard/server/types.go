@@ -3,7 +3,7 @@ package main
 import (
 	"time"
 
-	task "github.com/langhuihui/gotask"
+	task "github.com/langhuihui/gotask/v2"
 	"gorm.io/gorm"
 )
 

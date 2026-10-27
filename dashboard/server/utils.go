@@ -1,6 +1,6 @@
 package main
 
-import task "github.com/langhuihui/gotask"
+import task "github.com/langhuihui/gotask/v2"
 
 // findActiveChild 返回第一个「正在执行」的直接子任务（RUNNING/GOING/DISPOSING）。
 //

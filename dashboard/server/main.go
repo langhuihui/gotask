@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	task "github.com/langhuihui/gotask"
+	task "github.com/langhuihui/gotask/v2"
 )
 
 // DemoTask 演示任务

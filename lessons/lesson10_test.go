@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	task "github.com/langhuihui/gotask"
+	task "github.com/langhuihui/gotask/v2"
 )
 
 // TestTaskFactory Test task factory (based on monibuca pattern)

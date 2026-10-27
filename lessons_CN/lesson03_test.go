@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	task "github.com/langhuihui/gotask"
+	task "github.com/langhuihui/gotask/v2"
 )
 
 // WorkerTask03 工作任务（会自动完成）

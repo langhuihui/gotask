@@ -11,7 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/langhuihui/gotask/util"
+	"github.com/langhuihui/gotask/v2/util"
 )
 
 var idG sync.Mutex

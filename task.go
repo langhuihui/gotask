@@ -16,7 +16,7 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/langhuihui/gotask/util"
+	"github.com/langhuihui/gotask/v2/util"
 )
 
 const TraceLevel = slog.Level(-8)

@@ -6,7 +6,7 @@ toolchain go1.24.7
 
 require (
 	github.com/gorilla/mux v1.8.1
-	github.com/langhuihui/gotask v0.0.0-00010101000000-000000000000
+	github.com/langhuihui/gotask/v2 v2.0.0
 	github.com/ncruces/go-sqlite3/gormlite v0.24.0
 	gorm.io/gorm v1.30.0
 )
@@ -21,4 +21,4 @@ require (
 	golang.org/x/text v0.29.0 // indirect
 )
 
-replace github.com/langhuihui/gotask => ../..
+replace github.com/langhuihui/gotask/v2 => ../..

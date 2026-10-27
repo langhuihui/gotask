@@ -8,7 +8,7 @@
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-blue.svg)](https://golang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/github.com/langhuihui/gotask)](https://goreportcard.com/report/github.com/langhuihui/gotask)
-[![GoDoc](https://godoc.org/github.com/langhuihui/gotask?status.svg)](https://godoc.org/github.com/langhuihui/gotask)
+[![GoDoc](https://godoc.org/github.com/langhuihui/gotask/v2?status.svg)](https://godoc.org/github.com/langhuihui/gotask/v2)
 
 > An asynchronous task management framework based on Go language, providing precise control capabilities similar to an operating system task manager
 
@@ -116,7 +116,7 @@ GoTask is not just a task management framework, but an architectural philosophy 
 ### Installation
 
 ```bash
-go get github.com/langhuihui/gotask
+go get github.com/langhuihui/gotask/v2
 ```
 
 ### Build Options
@@ -137,7 +137,7 @@ go build -tags taskpanic
 package main
 
 import (
-    "github.com/langhuihui/gotask"
+    "github.com/langhuihui/gotask/v2"
     "time"
 )
 
@@ -325,7 +325,7 @@ Visit `http://localhost:5173` to view the task management interface.
 
 ---
 
-This project includes an independent task library (`github.com/langhuihui/gotask`), a React-based management interface, and an example backend program.
+This project includes an independent task library (`github.com/langhuihui/gotask/v2`), a React-based management interface, and an example backend program.
 
 ## AI IDE Rules
 
@@ -1325,7 +1325,7 @@ Thanks to all developers and community members who have contributed to the GoTas
 
 ## Related Links
 
-- [GoDoc Documentation](https://godoc.org/github.com/langhuihui/gotask)
+- [GoDoc Documentation](https://godoc.org/github.com/langhuihui/gotask/v2)
 - [Go Report Card](https://goreportcard.com/report/github.com/langhuihui/gotask)
 - [GitHub Issues](https://github.com/langhuihui/gotask/issues)
 - [GitHub Discussions](https://github.com/langhuihui/gotask/discussions)

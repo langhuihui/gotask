@@ -9,7 +9,7 @@
 [![Go Version](https://img.shields.io/badge/go-%3E%3D1.23-blue.svg)](https://golang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Go Report Card](https://goreportcard.com/badge/github.com/langhuihui/gotask)](https://goreportcard.com/report/github.com/langhuihui/gotask)
-[![GoDoc](https://godoc.org/github.com/langhuihui/gotask?status.svg)](https://godoc.org/github.com/langhuihui/gotask)
+[![GoDoc](https://godoc.org/github.com/langhuihui/gotask/v2?status.svg)](https://godoc.org/github.com/langhuihui/gotask/v2)
 
 > 一个基于 Go 语言的异步任务管理框架，提供类似操作系统任务管理器的精确控制能力
 
@@ -116,7 +116,7 @@ GoTask 不仅是一个任务管理框架，更是一种架构思想，帮助开�
 ### 安装
 
 ```bash
-go get github.com/langhuihui/gotask
+go get github.com/langhuihui/gotask/v2
 ```
 
 ### 构建选项
@@ -137,7 +137,7 @@ go build -tags taskpanic
 package main
 
 import (
-    "github.com/langhuihui/gotask"
+    "github.com/langhuihui/gotask/v2"
     "time"
 )
 
@@ -323,7 +323,7 @@ pnpm run dev
 
 ---
 
-本项目包含了一个独立的任务库（`github.com/langhuihui/gotask`）、一个基于 React 的管理界面和一个示例后端程序。
+本项目包含了一个独立的任务库（`github.com/langhuihui/gotask/v2`）、一个基于 React 的管理界面和一个示例后端程序。
 
 ## AI IDE 规则
 
@@ -1333,7 +1333,7 @@ GoTask 项目提供了完整的教学课程系统，位于 `lessons_CN/` 目录�
 
 ## 相关链接
 
-- [GoDoc 文档](https://godoc.org/github.com/langhuihui/gotask)
+- [GoDoc 文档](https://godoc.org/github.com/langhuihui/gotask/v2)
 - [Go Report Card](https://goreportcard.com/report/github.com/langhuihui/gotask)
 - [GitHub Issues](https://github.com/langhuihui/gotask/issues)
 - [GitHub Discussions](https://github.com/langhuihui/gotask/discussions)
