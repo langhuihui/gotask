@@ -38,6 +38,15 @@ var (
 	// 余地，父任务按 FailurePolicy 升级（Phase 3 3B）。原始失败原因用 errors.Join
 	// 一起携带，errors.Is 可分别匹配。
 	ErrChildFailed = errors.New("child failed")
+	// ErrNotTickTask 表示 TickTask 族在没有绑定 handler、或 handler 未实现
+	// ITickTask 的情况下被启动。v2 之前这里是裸类型断言（直接 panic，且 panic
+	// 点在调用方 goroutine 上，进程崩溃）；v2 起改为走正常的启动失败路径，
+	// 可诊断、可重试（设计见 docs/重构-执行模型v2-大版本v2设计.md §4.5）。
+	ErrNotTickTask = errors.New("tick task requires a handler implementing ITickTask")
+	// ErrLegacyTaskGo 是 v1→v2 的迁移守卫：handler 仍只实现 v1 的 Go() 而不
+	// 实现 Run()。v2 删除了 TaskGo，若不显式报错，这类任务会「编译通过、启动
+	// 成功、什么都不做」，一直空转到被外部停止——静默破坏比编译错误危险得多。
+	ErrLegacyTaskGo = errors.New("task: Go() is no longer a task entry point; rename it to Run() error")
 )
 
 // FailurePolicy 是父任务对子任务失败的处理策略（Phase 3 3B，默认全关）。
