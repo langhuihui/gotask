@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#070d18">
+<meta name="description" content="GoTask —— Go 语言的进程内任务生命周期内核。用任务树与单协程事件循环，统一管理启动、运行、停止、重试、资源回收与观测。">
+<title>GoTask · 让每一个任务都有始有终</title>
+<link rel="icon" href="assets/logo.png">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
+<div class="bg-grid" aria-hidden="true"></div>
+
+<header class="site-header" id="siteHeader">
+  <div class="container header-inner">
+    <a class="brand" href="#home" aria-label="GoTask 首页">
+      <span class="brand-mark"><img src="assets/logo.png" alt=""></span>
+      <span class="brand-name">Go<span>Task</span></span>
+    </a>
+    <nav class="nav" id="mainNav" aria-label="主导航">
+      <a class="nav-link" href="#why">设计理念</a>
+      <a class="nav-link" href="#lab">原理动画</a>
+      <a class="nav-link" href="#features">功能特性</a>
+      <a class="nav-link" href="#start">快速开始</a>
+      <a class="nav-link" href="#observability">可观测</a>
+    </nav>
+    <div class="header-actions">
+      <a class="btn btn-ghost btn-sm" href="https://pkg.go.dev/github.com/langhuihui/gotask" target="_blank" rel="noopener noreferrer">GoDoc</a>
+      <a class="btn btn-primary btn-sm" href="https://github.com/langhuihui/gotask" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a>
+      <button class="nav-toggle" id="navToggle" aria-label="打开菜单" aria-expanded="false" aria-controls="mainNav"><span></span><span></span><span></span></button>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ HERO ============ -->
+  <section class="hero" id="home">
+    <div class="hero-glow" aria-hidden="true"></div>
+    <div class="container hero-inner">
+      <div class="hero-copy">
+        <div class="eyebrow"><span class="pulse-dot"></span> Go 1.23 <i>·</i> 零第三方依赖 <i>·</i> MIT</div>
+        <h1>让每一个任务<br><span class="grad">都有始有终</span></h1>
+        <p class="hero-lead">GoTask 是 Go 的<strong>进程内任务生命周期内核</strong>。用「任务树 + 单协程事件循环」统一管理组件的启动、运行、停止、重试、资源回收与观测——像操作系统任务管理器一样，精确控制任意粒度的逻辑。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary btn-lg" href="#lab"><span class="btn-play" aria-hidden="true">▶</span> 观看原理动画</a>
+          <a class="btn btn-outline btn-lg" href="#start">快速开始 <span aria-hidden="true">→</span></a>
+        </div>
+        <div class="install">
+          <span class="install-prompt">$</span>
+          <code>go get github.com/langhuihui/gotask</code>
+          <button class="copy-btn" type="button" data-copy="go get github.com/langhuihui/gotask" aria-label="复制安装命令">复制</button>
+        </div>
+        <div class="hero-foot">
+          <span><b>✓</b> 一切皆任务</span>
+          <span><b>✓</b> 协作式优雅关闭</span>
+          <span><b>✓</b> 七态可观测</span>
+        </div>
+      </div>
+
+      <div class="hero-visual" aria-label="任务树与事件循环动画示意图">
+        <div class="float-badge float-badge--a"><span class="mini-dot"></span> reflect.Select × 3</div>
+        <div class="float-badge float-badge--b">state: <b id="heroState">RUNNING</b></div>
+        <div class="float-badge float-badge--c">retry 1 / 3 <span class="mini-dot mini-dot--amber"></span></div>
+        <svg class="hero-svg" viewBox="0 0 520 440" role="img" aria-label="RootManager 管理 Job 与三个子任务的任务树">
+          <defs>
+            <linearGradient id="nodeFill" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#132a38"/>
+              <stop offset="100%" stop-color="#0c1a28"/>
+            </linearGradient>
+            <linearGradient id="rootFill" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#17505a"/>
+              <stop offset="100%" stop-color="#0e3543"/>
+            </linearGradient>
+          </defs>
+
+          <path id="hv-p1" class="hv-wire" d="M260 86 L260 148"/>
+          <path class="hv-wire" d="M260 216 C260 250 85 250 85 288"/>
+          <path class="hv-wire" d="M260 216 L260 288"/>
+          <path class="hv-wire" d="M260 216 C260 250 435 250 435 288"/>
+          <path class="hv-flow" d="M260 86 L260 148"/>
+          <path class="hv-flow" d="M260 216 C260 250 85 250 85 288"/>
+          <path class="hv-flow" d="M260 216 L260 288"/>
+          <path class="hv-flow" d="M260 216 C260 250 435 250 435 288"/>
+
+          <g class="hv-node hv-node--root" transform="translate(150 20)">
+            <rect width="220" height="66" rx="16"/>
+            <text class="hv-title" x="20" y="29">RootManager</text>
+            <text class="hv-sub" x="20" y="50">task tree root · OS signal</text>
+            <circle class="hv-live" cx="198" cy="33" r="5"/>
+          </g>
+          <g class="hv-node hv-node--core" transform="translate(150 150)">
+            <rect width="220" height="66" rx="16"/>
+            <text class="hv-title" x="20" y="29">Job · EventLoop</text>
+            <text class="hv-sub" x="20" y="50">1 goroutine · dynamic cases</text>
+            <circle class="hv-live hv-live--core" cx="198" cy="33" r="5"/>
+          </g>
+          <g class="hv-node" transform="translate(10 288)">
+            <rect width="150" height="78" rx="14"/>
+            <text class="hv-title hv-title--sm" x="16" y="28">HTTP Server</text>
+            <text class="hv-sub" x="16" y="48">RUNNING</text>
+            <text class="hv-sub hv-sub--dim" x="16" y="66">Run() 阻塞</text>
+          </g>
+          <g class="hv-node" transform="translate(185 288)">
+            <rect width="150" height="78" rx="14"/>
+            <text class="hv-title hv-title--sm" x="16" y="28">Data Pipeline</text>
+            <text class="hv-sub" x="16" y="48">GOING</text>
+            <text class="hv-sub hv-sub--dim" x="16" y="66">Go() 独立协程</text>
+          </g>
+          <g class="hv-node" transform="translate(360 288)">
+            <rect width="150" height="78" rx="14"/>
+            <text class="hv-title hv-title--sm" x="16" y="28">Ticker</text>
+            <text class="hv-sub" x="16" y="48">CHANNEL</text>
+            <text class="hv-sub hv-sub--dim" x="16" y="66">Tick(any)</text>
+          </g>
+
+          <g class="hv-caption" transform="translate(10 396)">
+            <rect width="500" height="30" rx="9"/>
+            <text x="14" y="20">Stop(reason) → Context 取消 → 子任务自底向上回收</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+    <a class="scroll-hint" href="#why"><span>向下探索原理</span><i aria-hidden="true"></i></a>
+  </section>
+
+  <!-- ============ METRICS ============ -->
+  <section class="metrics" aria-label="关键指标">
+    <div class="container metrics-grid">
+      <div class="metric reveal"><strong data-count="0">0</strong><span>第三方依赖<i>仅标准库</i></span></div>
+      <div class="metric reveal"><strong data-count="7">7</strong><span>生命周期状态<i>atomic 状态机</i></span></div>
+      <div class="metric reveal"><strong data-count="1">1</strong><span>协程 / 每个 Job<i>顺序执行无锁</i></span></div>
+      <div class="metric reveal"><strong data-count="65535">65535</strong><span>case 上限保护<i>reflect.Select 硬限制</i></span></div>
+    </div>
+  </section>
+
+  <!-- ============ WHY ============ -->
+  <section class="section" id="why">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker">01 / WHY GOTASK</span>
+        <h2>复杂项目里，难的不是「跑起来」<br>而是<span class="grad">「停得干净」</span></h2>
+        <p>goroutine 可以随手写，但谁创建、归谁管、何时算启动成功、失败后是否重跑、资源由谁释放——这些问题的答案，决定了系统在压力下的样子。</p>
+      </div>
+
+      <div class="identity-strip reveal">
+        <span class="identity-label">每个任务同时是</span>
+        <span class="identity-chip">生命周期对象</span>
+        <span class="identity-chip">树节点</span>
+        <span class="identity-chip">context.Context</span>
+        <span class="identity-chip">可观测对象</span>
+      </div>
+
+      <div class="problem-grid">
+        <article class="problem-card reveal">
+          <div class="problem-icon"><span class="icon-node"></span></div>
+          <span class="card-index">01</span>
+          <h3>可观测性</h3>
+          <p>任务树、唯一 ID、启动/停止原因、重试次数与调用点文件行号，让执行路径不再靠猜。</p>
+        </article>
+        <article class="problem-card reveal">
+          <div class="problem-icon"><span class="icon-lanes"></span></div>
+          <span class="card-index">02</span>
+          <h3>并发安全</h3>
+          <p>子任务的 Start / Run / Dispose 与 Job.Call 闭包，都在父任务唯一协程内顺序执行。</p>
+        </article>
+        <article class="problem-card reveal">
+          <div class="problem-icon"><span class="icon-tree"></span></div>
+          <span class="card-index">03</span>
+          <h3>资源销毁</h3>
+          <p>分阶段清理顺序、自动级联销毁、关联销毁与竞态安全，解决异步系统最棘手的一题。</p>
+        </article>
+        <article class="problem-card reveal">
+          <div class="problem-icon"><span class="icon-shield"></span></div>
+          <span class="card-index">04</span>
+          <h3>系统稳定性</h3>
+          <p>优雅关闭、指数退避重试、panic 兜底与钩子代际护栏，让异常路径也有确定性。</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ LAB / ANIMATED PRINCIPLES ============ -->
+  <section class="section section--lab" id="lab">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker">02 / INTERACTIVE LAB</span>
+        <h2>把原理<span class="grad">放慢</span>看一遍</h2>
+        <p>四段可交互动画，逐步演示 GoTask 的调度内核、状态机、级联销毁与重试策略。可自动播放，也可单步查看每一步对应的源码位置。</p>
+      </div>
+
+      <div class="lab-shell reveal">
+        <div class="lab-tabs" role="tablist" aria-label="原理动画切换">
+          <button class="lab-tab is-active" data-tab="loop" role="tab" aria-selected="true"><span>01</span> 事件循环</button>
+          <button class="lab-tab" data-tab="fsm" role="tab" aria-selected="false"><span>02</span> 七态生命周期</button>
+          <button class="lab-tab" data-tab="cascade" role="tab" aria-selected="false"><span>03</span> 级联销毁</button>
+          <button class="lab-tab" data-tab="retry" role="tab" aria-selected="false"><span>04</span> 指数退避重试</button>
+        </div>
+
+        <!-- PANEL 1: EVENT LOOP -->
+        <div class="lab-panel is-active" data-panel="loop" role="tabpanel">
+          <div class="panel-intro">
+            <div>
+              <h3>单协程事件循环 · 一次任务的完整旅程</h3>
+              <p>任意 goroutine 提交任务 → 输入通道 → 动态 <code>reflect.Select</code> 调度 → 启动 / 重试 / 回收 → 自动休眠。</p>
+            </div>
+            <label class="switch">
+              <input type="checkbox" id="loopRetry" checked>
+              <span class="switch-track" aria-hidden="true"></span>
+              <span class="switch-label">失败后触发重试</span>
+            </label>
+          </div>
+
+          <div class="scene scene--loop" id="scene-loop">
+            <div class="loop-stage">
+              <div class="loop-lane">
+                <div class="lane-head"><i class="lane-dot dot-violet"></i>业务 goroutine</div>
+                <div class="producer-box" id="producerBox">
+                  <code>job.AddTask(t)</code>
+                  <span class="producer-task" id="producerTask">t · *Worker</span>
+                </div>
+                <p class="lane-note">任意协程可安全提交</p>
+              </div>
+              <div class="loop-lane">
+                <div class="lane-head"><i class="lane-dot dot-amber"></i>Input Channel <span class="lane-tag">case 0</span></div>
+                <div class="queue" id="loopQueue">
+                  <div class="queue-slot"></div><div class="queue-slot"></div><div class="queue-slot"></div>
+                </div>
+                <p class="lane-note">buffer 256 · 满则 ErrTooManyChildren</p>
+              </div>
+              <div class="loop-lane loop-lane--core">
+                <div class="lane-head"><i class="lane-dot dot-teal"></i>父 Job 的唯一协程</div>
+                <div class="loop-core" id="loopCore">
+                  <div class="core-top"><span class="core-title">EventLoop.run()</span><span class="core-status" id="loopStatus">idle</span></div>
+                  <div class="select-box" id="loopSelect">
+                    <div class="select-title">reflect.Select(cases)</div>
+                    <div class="case-list" id="loopCases">
+                      <div class="case-chip case-chip--base">case 0 · input chan</div>
+                    </div>
+                  </div>
+                  <div class="core-op" id="loopOp">等待事件…</div>
+                </div>
+              </div>
+              <div class="loop-lane">
+                <div class="lane-head"><i class="lane-dot dot-blue"></i>子任务</div>
+                <div class="child-list" id="loopChildren"><div class="child-empty">暂无子任务</div></div>
+              </div>
+            </div>
+            <span class="packet" id="loopPacket" aria-hidden="true"></span>
+            <div class="scene-log" id="loopLog" aria-live="polite"></div>
+          </div>
+          <div class="player" data-player="loop"></div>
+        </div>
+
+        <!-- PANEL 2: STATE MACHINE -->
+        <div class="lab-panel" data-panel="fsm" role="tabpanel" hidden>
+          <div class="panel-intro">
+            <div>
+              <h3>七态状态机 · 从 INIT 到 DISPOSED</h3>
+              <p>状态由 <code>atomic.Uint32</code> 持有，任意 goroutine 可安全读取；鸭子类型接口决定任务怎样运行。</p>
+            </div>
+            <div class="segmented" id="fsmMode" role="group" aria-label="运行形态">
+              <button class="is-active" data-mode="run">阻塞 Run()</button>
+              <button data-mode="go">异步 Go()</button>
+            </div>
+          </div>
+          <div class="scene scene--fsm" id="scene-fsm">
+            <div class="fsm-wrap">
+              <svg class="fsm-svg" viewBox="0 0 1000 350" role="img" aria-label="GoTask 七态生命周期状态机">
+                <defs>
+                  <marker id="fsmArrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0 L10 5 L0 10 z" fill="#3b6b78"/>
+                  </marker>
+                </defs>
+                <path class="fsm-edge" data-edge="e1" d="M140 165 H188" marker-end="url(#fsmArrow)"/>
+                <path class="fsm-edge" data-edge="e2" d="M310 165 H358" marker-end="url(#fsmArrow)"/>
+                <path class="fsm-edge" data-edge="e3" d="M480 150 C505 150 505 62 533 62" marker-end="url(#fsmArrow)"/>
+                <path class="fsm-edge" data-edge="e3b" d="M480 180 C505 180 505 258 533 258" marker-end="url(#fsmArrow)"/>
+                <path class="fsm-edge" data-edge="e4" d="M655 62 C688 62 688 150 708 150" marker-end="url(#fsmArrow)"/>
+                <path class="fsm-edge" data-edge="e4b" d="M655 258 C688 258 688 180 708 180" marker-end="url(#fsmArrow)"/>
+                <path class="fsm-edge" data-edge="e5" d="M830 165 H858" marker-end="url(#fsmArrow)"/>
+                <path class="fsm-edge fsm-edge--retry" data-edge="e6" d="M595 94 C595 306 250 306 250 199" marker-end="url(#fsmArrow)"/>
+                <text class="fsm-edge-label" x="420" y="330" text-anchor="middle">checkRetry() → reset() → start()</text>
+                <text class="fsm-edge-label" x="500" y="42" text-anchor="middle">Run()</text>
+                <text class="fsm-edge-label" x="500" y="290" text-anchor="middle">Go()</text>
+
+                <g class="fsm-node" data-node="init" transform="translate(20 133)">
+                  <rect width="120" height="64" rx="14"/>
+                  <text class="fsm-name" x="60" y="28" text-anchor="middle">INIT</text>
+                  <text class="fsm-note" x="60" y="48" text-anchor="middle">等待注册</text>
+                </g>
+                <g class="fsm-node" data-node="starting" transform="translate(190 133)">
+                  <rect width="120" height="64" rx="14"/>
+                  <text class="fsm-name" x="60" y="28" text-anchor="middle">STARTING</text>
+                  <text class="fsm-note" x="60" y="48" text-anchor="middle">Start()</text>
+                </g>
+                <g class="fsm-node" data-node="started" transform="translate(360 133)">
+                  <rect width="120" height="64" rx="14"/>
+                  <text class="fsm-name" x="60" y="28" text-anchor="middle">STARTED</text>
+                  <text class="fsm-note" x="60" y="48" text-anchor="middle">startup.Fulfill</text>
+                </g>
+                <g class="fsm-node" data-node="running" transform="translate(535 30)">
+                  <rect width="120" height="64" rx="14"/>
+                  <text class="fsm-name" x="60" y="28" text-anchor="middle">RUNNING</text>
+                  <text class="fsm-note" x="60" y="48" text-anchor="middle">父循环内阻塞</text>
+                </g>
+                <g class="fsm-node" data-node="going" transform="translate(535 226)">
+                  <rect width="120" height="64" rx="14"/>
+                  <text class="fsm-name" x="60" y="28" text-anchor="middle">GOING</text>
+                  <text class="fsm-note" x="60" y="48" text-anchor="middle">独立 goroutine</text>
+                </g>
+                <g class="fsm-node" data-node="disposing" transform="translate(710 133)">
+                  <rect width="120" height="64" rx="14"/>
+                  <text class="fsm-name" x="60" y="28" text-anchor="middle">DISPOSING</text>
+                  <text class="fsm-note" x="60" y="48" text-anchor="middle">分阶段清理</text>
+                </g>
+                <g class="fsm-node" data-node="disposed" transform="translate(860 133)">
+                  <rect width="120" height="64" rx="14"/>
+                  <text class="fsm-name" x="60" y="28" text-anchor="middle">DISPOSED</text>
+                  <text class="fsm-note" x="60" y="48" text-anchor="middle">shutdown.Fulfill</text>
+                </g>
+              </svg>
+            </div>
+            <div class="fsm-side">
+              <span class="side-label">当前状态</span>
+              <strong class="fsm-current" id="fsmCurrent">INIT</strong>
+              <span class="side-label">触发方法</span>
+              <code class="fsm-method" id="fsmMethod">job.AddTask(t)</code>
+              <div class="fsm-flags" id="fsmFlags"><span>startup ⧗</span><span>shutdown ⧗</span></div>
+            </div>
+            <div class="scene-log" id="fsmLog" aria-live="polite"></div>
+          </div>
+          <div class="player" data-player="fsm"></div>
+        </div>
+
+        <!-- PANEL 3: CASCADE DISPOSE -->
+        <div class="lab-panel" data-panel="cascade" role="tabpanel" hidden>
+          <div class="panel-intro">
+            <div>
+              <h3>级联销毁 · 自底向上，一个都不丢</h3>
+              <p>OS 信号沿任务树传播停止原因；父任务逐个等待子任务销毁完成，再释放自身资源。</p>
+            </div>
+            <button class="btn btn-outline btn-sm" type="button" id="cascadeTrigger">模拟 SIGTERM <span aria-hidden="true">↯</span></button>
+          </div>
+          <div class="scene scene--cascade" id="scene-cascade">
+            <div class="cascade-wrap">
+              <ul class="tree" id="cascadeTree">
+                <li>
+                  <div class="tree-node" data-node="root" data-depth="0">
+                    <span class="tree-badge"></span>
+                    <span class="tree-text"><b>RootManager</b><small>WORK · level 0</small></span>
+                  </div>
+                  <ul>
+                    <li><div class="tree-node" data-node="ossignal" data-depth="1"><span class="tree-badge"></span><span class="tree-text"><b>OSSignal</b><small>CHANNEL · 信号源</small></span></div></li>
+                    <li>
+                      <div class="tree-node" data-node="job" data-depth="1"><span class="tree-badge"></span><span class="tree-text"><b>background-worker</b><small>JOB · 事件循环</small></span></div>
+                      <ul>
+                        <li><div class="tree-node" data-node="task4" data-depth="2"><span class="tree-badge"></span><span class="tree-text"><b>demo-task-4</b><small>TASK</small></span></div></li>
+                        <li><div class="tree-node" data-node="task5" data-depth="2"><span class="tree-badge"></span><span class="tree-text"><b>demo-task-5</b><small>TASK</small></span></div></li>
+                        <li><div class="tree-node" data-node="task6" data-depth="2"><span class="tree-badge"></span><span class="tree-text"><b>demo-task-6</b><small>TASK</small></span></div></li>
+                      </ul>
+                    </li>
+                    <li>
+                      <div class="tree-node" data-node="work" data-depth="1"><span class="tree-badge"></span><span class="tree-text"><b>KeepaliveTask</b><small>WORK · 长驻容器</small></span></div>
+                      <ul>
+                        <li><div class="tree-node" data-node="long" data-depth="2"><span class="tree-badge"></span><span class="tree-text"><b>LongRunningTask</b><small>TASK</small></span></div></li>
+                      </ul>
+                    </li>
+                  </ul>
+                </li>
+              </ul>
+            </div>
+            <div class="cascade-side">
+              <span class="side-label">销毁顺序</span>
+              <ol class="cascade-order" id="cascadeOrder"></ol>
+            </div>
+            <div class="scene-log" id="cascadeLog" aria-live="polite"></div>
+          </div>
+          <div class="player" data-player="cascade"></div>
+        </div>
+
+        <!-- PANEL 4: RETRY -->
+        <div class="lab-panel" data-panel="retry" role="tabpanel" hidden>
+          <div class="panel-intro">
+            <div>
+              <h3>指数退避重试 · 失败也是一条确定的路径</h3>
+              <p><code>checkRetry()</code> 按 <code>base × 2^(n-1)</code> 计算等待，可设上限、可无限重试，也可被停止原因立即终止。</p>
+            </div>
+            <div class="segmented" id="retryOutcome" role="group" aria-label="重试结果">
+              <button class="is-active" data-outcome="success">第 4 次成功</button>
+              <button data-outcome="exhaust">用尽重试</button>
+            </div>
+          </div>
+          <div class="scene scene--retry" id="scene-retry">
+            <div class="retry-top">
+              <div class="retry-counter"><span>retryCount</span><strong id="retryCount">0</strong><span>/ MaxRetry 5</span></div>
+              <div class="retry-formula"><code>interval = base × 2^(n-1)</code><span>base = 1s · MaxRetryInterval 可封顶 · -1 表示无限重试</span></div>
+            </div>
+            <div class="retry-timeline" id="retryTimeline">
+              <div class="retry-attempt" data-attempt="1"><div class="attempt-head"><b>#1</b><span class="attempt-state">待执行</span></div><div class="attempt-track"><div class="attempt-fill"></div></div><div class="attempt-meta"><code>首次执行</code><span>失败</span></div></div>
+              <div class="retry-attempt" data-attempt="2"><div class="attempt-head"><b>#2</b><span class="attempt-state">待执行</span></div><div class="attempt-track"><div class="attempt-fill"></div></div><div class="attempt-meta"><code>等待 1s</code><span>base × 2⁰</span></div></div>
+              <div class="retry-attempt" data-attempt="3"><div class="attempt-head"><b>#3</b><span class="attempt-state">待执行</span></div><div class="attempt-track"><div class="attempt-fill"></div></div><div class="attempt-meta"><code>等待 2s</code><span>base × 2¹</span></div></div>
+              <div class="retry-attempt" data-attempt="4"><div class="attempt-head"><b>#4</b><span class="attempt-state">待执行</span></div><div class="attempt-track"><div class="attempt-fill"></div></div><div class="attempt-meta"><code>等待 4s</code><span>base × 2²</span></div></div>
+            </div>
+            <div class="retry-result" id="retryResult">点击播放，观察退避过程 <span aria-hidden="true">→</span></div>
+            <div class="scene-log" id="retryLog" aria-live="polite"></div>
+          </div>
+          <div class="player" data-player="retry"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ FEATURES ============ -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker">03 / CAPABILITIES</span>
+        <h2>一套内核，<span class="grad">覆盖整个生命周期</span></h2>
+        <p>以下能力均来自核心库实现，而非概念承诺。</p>
+      </div>
+      <div class="feature-grid">
+        <article class="feature-card reveal">
+          <div class="feature-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M4 8h24M4 16h16M4 24h10"/><circle cx="26" cy="24" r="3"/></svg></div>
+          <h3>动态 reflect.Select</h3>
+          <p>运行时增减 case，突破 Go 静态 select 限制；删除用 swap-delete，65535 上限与输入通道背压双重保护。</p>
+          <span class="feature-tag">event_loop.go</span>
+        </article>
+        <article class="feature-card reveal">
+          <div class="feature-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="5" y="6" width="22" height="20" rx="4"/><path d="M10 13h12M10 18h8M10 22h5"/></svg></div>
+          <h3>单协程事件循环</h3>
+          <p>Start / Run / Dispose 与 Job.Call 闭包都在父任务唯一协程内串行执行，共享状态无需加锁。</p>
+          <span class="feature-tag">Job.Call</span>
+        </article>
+        <article class="feature-card reveal">
+          <div class="feature-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><rect x="12" y="4" width="8" height="7" rx="2"/><rect x="3" y="21" width="8" height="7" rx="2"/><rect x="21" y="21" width="8" height="7" rx="2"/><path d="M16 11v6M7 21v-4h18v4"/></svg></div>
+          <h3>任务树与级联销毁</h3>
+          <p>按业务 Key 去重；父任务停止时逐个 Stop 子任务并等待 shutdown，Work 容器可持续长驻。</p>
+          <span class="feature-tag">job.go</span>
+        </article>
+        <article class="feature-card reveal">
+          <div class="feature-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M6 26V6h8M6 16h20M18 6v20"/><circle cx="6" cy="6" r="2"/><circle cx="26" cy="16" r="2"/><circle cx="18" cy="26" r="2"/></svg></div>
+          <h3>分阶段资源回收</h3>
+          <p>PreDispose → 等待子任务 → Dispose → resources → OnDispose；io.Closer、Recyclable 与关联任务自动释放。</p>
+          <span class="feature-tag">task.go · dispose()</span>
+        </article>
+        <article class="feature-card reveal">
+          <div class="feature-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M9 8a5 5 0 0 1 0 8l5 5a5 5 0 0 0 0 8M23 8a5 5 0 0 0 0 8l-5 5a5 5 0 0 1 0 8"/></svg></div>
+          <h3>生命周期钩子</h3>
+          <p>OnStart / OnDispose / OnStop / Using；晚注册补跑队列与 hookGen 代际护栏，杜绝钩子丢失与重试串台。</p>
+          <span class="feature-tag">hookGen</span>
+        </article>
+        <article class="feature-card reveal">
+          <div class="feature-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M5 16a11 11 0 1 1 3 8"/><path d="M5 9v7h7"/><path d="M16 10v6l4 2"/></svg></div>
+          <h3>可选重试策略</h3>
+          <p>SetRetry 指数退避、MaxRetryInterval 封顶、-1 无限重试；ErrTaskComplete / ErrExit 等停止原因立即收敛。</p>
+          <span class="feature-tag">checkRetry()</span>
+        </article>
+        <article class="feature-card reveal">
+          <div class="feature-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><circle cx="7" cy="16" r="3"/><circle cx="25" cy="8" r="3"/><circle cx="25" cy="24" r="3"/><path d="M10 16h5l7-8M15 16l7 8"/></svg></div>
+          <h3>泛型强类型编排</h3>
+          <p>TaskFunc[T] 与 Then / Map / Chain、Parallel / ParallelMap、WithRetry / WithTimeout，增量接入且无 breaking change。</p>
+          <span class="feature-tag">generic.go</span>
+        </article>
+        <article class="feature-card reveal">
+          <div class="feature-icon"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 3l11 4v8c0 7-5 11-11 14C10 26 5 22 5 15V7z"/><path d="M11 16l3 3 7-7"/></svg></div>
+          <h3>可观测与兜底</h3>
+          <p>ID、StartReason、StopReason、RetryCount、slog 结构化日志；四处 recover 兜底，-tags taskpanic 切换调试直抛。</p>
+          <span class="feature-tag">stability</span>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ QUICK START ============ -->
+  <section class="section section--start" id="start">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker">04 / GET STARTED</span>
+        <h2>三分钟，把任务<span class="grad">托付给树</span></h2>
+        <p>用 RootManager 作为根，任务只需实现自己关心的钩子方法。</p>
+      </div>
+
+      <div class="start-grid reveal">
+        <div class="code-window">
+          <div class="window-bar">
+            <span class="window-dots"><i></i><i></i><i></i></span>
+            <div class="code-tabs" role="tablist" aria-label="代码示例">
+              <button class="code-tab is-active" data-code="basic" role="tab" aria-selected="true">最小示例</button>
+              <button class="code-tab" data-code="generic" role="tab" aria-selected="false">泛型编排</button>
+              <button class="code-tab" data-code="hooks" role="tab" aria-selected="false">钩子与重试</button>
+            </div>
+            <button class="copy-btn copy-btn--window" type="button" data-copy-target="codeBasic" aria-label="复制代码">复制</button>
+          </div>
+
+          <div class="code-panel is-active" data-code-panel="basic">
+<pre id="codeBasic"><code><span class="cm">// 一切皆任务：嵌入 task.Task，按需实现生命周期方法</span>
+<span class="kw">package</span> main
+
+<span class="kw">import</span> (
+    <span class="str">"time"</span>
+
+    <span class="str">"github.com/langhuihui/gotask"</span>
+)
+
+<span class="kw">type</span> <span class="typ">Worker</span> <span class="kw">struct</span> {
+    task.Task
+}
+
+<span class="kw">func</span> (w *<span class="typ">Worker</span>) <span class="fn">Start</span>() <span class="typ">error</span> {
+    w.<span class="fn">Info</span>(<span class="str">"worker ready"</span>)
+    <span class="kw">return</span> <span class="kw">nil</span>
+}
+
+<span class="kw">func</span> (w *<span class="typ">Worker</span>) <span class="fn">Run</span>() <span class="typ">error</span> {
+    &lt;-w.<span class="fn">Done</span>()   <span class="cm">// 协作式停止：Context 被取消时退出</span>
+    <span class="kw">return</span> <span class="kw">nil</span>
+}
+
+<span class="kw">func</span> (w *<span class="typ">Worker</span>) <span class="fn">Dispose</span>() {
+    w.<span class="fn">Info</span>(<span class="str">"worker disposed"</span>)
+}
+
+<span class="kw">type</span> <span class="typ">Manager</span> = task.RootManager[<span class="typ">uint32</span>, *<span class="typ">Worker</span>]
+
+<span class="kw">func</span> <span class="fn">main</span>() {
+    root := &amp;<span class="typ">Manager</span>{}
+    root.<span class="fn">Init</span>()          <span class="cm">// 注册 OS 信号，建立任务树根</span>
+
+    worker := &amp;<span class="typ">Worker</span>{}
+    root.<span class="fn">AddTask</span>(worker)   <span class="cm">// 由父任务启动，勿直接调 Start()</span>
+
+    worker.<span class="fn">WaitStopped</span>()
+}</code></pre>
+          </div>
+
+          <div class="code-panel" data-code-panel="generic" hidden>
+<pre id="codeGeneric"><code><span class="cm">// 增量式泛型编排层：强类型、可组合、无 breaking change</span>
+source := task.<span class="fn">TaskFunc</span>[<span class="typ">int</span>](<span class="kw">func</span>(ctx context.Context) (<span class="typ">int</span>, <span class="typ">error</span>) {
+    <span class="kw">return</span> <span class="num">21</span>, <span class="kw">nil</span>
+})
+
+pipeline := task.<span class="fn">Then</span>(source, <span class="kw">func</span>(ctx context.Context, v <span class="typ">int</span>) (<span class="typ">string</span>, <span class="typ">error</span>) {
+    <span class="kw">return</span> fmt.<span class="fn">Sprintf</span>(<span class="str">"value:%d"</span>, v*<span class="num">2</span>), <span class="kw">nil</span>
+})
+result, err := pipeline.<span class="fn">Run</span>(context.<span class="fn">Background</span>())
+
+<span class="cm">// 并行聚合：首个错误会 cancel 兄弟任务</span>
+values, _ := task.<span class="fn">Parallel</span>(context.<span class="fn">Background</span>(),
+    <span class="kw">func</span>(context.Context) (<span class="typ">int</span>, <span class="typ">error</span>) { <span class="kw">return</span> <span class="num">1</span>, <span class="kw">nil</span> },
+    <span class="kw">func</span>(context.Context) (<span class="typ">int</span>, <span class="typ">error</span>) { <span class="kw">return</span> <span class="num">2</span>, <span class="kw">nil</span> },
+)
+
+named, _ := task.<span class="fn">ParallelMap</span>(context.<span class="fn">Background</span>(), <span class="kw">map</span>[<span class="typ">string</span>]task.TaskFunc[<span class="typ">int</span>]{
+    <span class="str">"alpha"</span>: <span class="kw">func</span>(context.Context) (<span class="typ">int</span>, <span class="typ">error</span>) { <span class="kw">return</span> <span class="num">1</span>, <span class="kw">nil</span> },
+    <span class="str">"beta"</span>:  <span class="kw">func</span>(context.Context) (<span class="typ">int</span>, <span class="typ">error</span>) { <span class="kw">return</span> <span class="num">2</span>, <span class="kw">nil</span> },
+})
+
+<span class="cm">// 策略装饰器可任意叠加</span>
+retried := task.<span class="fn">WithRetry</span>(source, task.<span class="typ">RetryPolicy</span>{
+    MaxRetry:      <span class="num">3</span>,
+    RetryInterval: time.Second,
+})
+timed := task.<span class="fn">WithTimeout</span>(retried, <span class="num">2</span>*time.Second)</code></pre>
+          </div>
+
+          <div class="code-panel" data-code-panel="hooks" hidden>
+<pre id="codeHooks"><code><span class="cm">// 重试策略、可观测字段、资源与钩子，全部在任务上声明</span>
+<span class="kw">func</span> <span class="fn">newWorker</span>() *<span class="typ">Worker</span> {
+    w := &amp;<span class="typ">Worker</span>{}
+
+    w.<span class="fn">SetRetry</span>(<span class="num">5</span>, time.Second)                <span class="cm">// 指数退避，最多 5 次</span>
+    w.<span class="fn">SetMaxRetryInterval</span>(<span class="num">30</span> * time.Second)    <span class="cm">// 退避封顶</span>
+    w.<span class="fn">SetDescription</span>(<span class="str">"role"</span>, <span class="str">"ingest"</span>)        <span class="cm">// Dashboard 可观测字段</span>
+
+    w.<span class="fn">Using</span>(conn)                              <span class="cm">// io.Closer / Recyclable 自动回收</span>
+    w.<span class="fn">OnStop</span>(otherTask)                         <span class="cm">// 关联停止</span>
+    w.<span class="fn">OnStart</span>(<span class="kw">func</span>() { w.<span class="fn">Info</span>(<span class="str">"online"</span>) })
+    w.<span class="fn">OnDispose</span>(<span class="kw">func</span>() { w.<span class="fn">Info</span>(<span class="str">"cleaned"</span>) })
+
+    <span class="kw">return</span> w
+}
+
+<span class="cm">// 把对共享状态的修改串行化到父任务的事件循环</span>
+job.<span class="fn">Call</span>(<span class="kw">func</span>() {
+    shared[<span class="str">"key"</span>] = value   <span class="cm">// 无需加锁</span>
+})
+
+<span class="cm">// 后代事件广播，可对接历史落库与监控</span>
+job.<span class="fn">OnDescendantsDispose</span>(<span class="kw">func</span>(t task.ITask) {
+    saveHistory(t.<span class="fn">GetTaskID</span>(), t.<span class="fn">StopReason</span>())
+})</code></pre>
+          </div>
+        </div>
+
+        <aside class="terminal-card">
+          <div class="terminal-head"><span class="terminal-dot"></span> 运行日志 <span class="terminal-tag">示意</span></div>
+          <div class="terminal" id="terminal" aria-live="polite"></div>
+          <div class="terminal-foot">
+            <div class="terminal-step"><b>01</b> 安装 <code>go get github.com/langhuihui/gotask</code></div>
+            <div class="terminal-step"><b>02</b> 实现 <code>Start / Run / Dispose</code></div>
+            <div class="terminal-step"><b>03</b> 用 <code>RootManager.Init()</code> 建立根</div>
+            <div class="terminal-step"><b>04</b> 打开 <code>dashboard/start.sh</code> 看任务树</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ OBSERVABILITY ============ -->
+  <section class="section" id="observability">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker">05 / OBSERVABILITY</span>
+        <h2>任务树，<span class="grad">看得见</span></h2>
+        <p>核心库提供后代事件广播与可观测字段；示例 Dashboard 用 <code>OnDescendantsDispose</code> 把历史写入 SQLite 并可视化。</p>
+      </div>
+      <div class="observe-grid">
+        <div class="browser reveal">
+          <div class="browser-bar"><span class="window-dots"><i></i><i></i><i></i></span><span class="browser-url">localhost:8082 · GoTask 任务管理系统</span></div>
+          <img src="assets/dashboard.png" alt="GoTask Dashboard 任务树界面截图，展示任务 ID、类型、状态、运行与重试次数">
+          <span class="browser-glow" aria-hidden="true"></span>
+        </div>
+        <div class="observe-list reveal">
+          <div class="observe-item"><span class="observe-num">01</span><div><h3>实时任务树</h3><p>Owner、状态、层级、启动时间、重试次数与发起程序调用点。</p></div></div>
+          <div class="observe-item"><span class="observe-num">02</span><div><h3>停止与重启</h3><p>面板直接对指定任务调用停止 / 重启，验证生命周期控制粒度。</p></div></div>
+          <div class="observe-item"><span class="observe-num">03</span><div><h3>历史与甘特</h3><p>按 ownerType、taskType、sessionId、parentId 与时间范围筛选分页查询。</p></div></div>
+          <div class="observe-item"><span class="observe-num">04</span><div><h3>一键启动</h3><p><code>./dashboard/start.sh</code> 构建前端并托管，后端 Go + SQLite，前端 React + TypeScript。</p></div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ BOUNDARY ============ -->
+  <section class="section section--boundary" id="boundary">
+    <div class="container">
+      <div class="section-head reveal">
+        <span class="kicker">06 / POSITIONING</span>
+        <h2>说清楚边界，<span class="grad">才谈得上可靠</span></h2>
+        <p>GoTask 不是分布式任务队列，也不假装是操作系统。它解决的是单个 Go 进程内的组件生命周期问题。</p>
+      </div>
+      <div class="boundary-grid">
+        <div class="boundary-card boundary-card--yes reveal">
+          <h3><span aria-hidden="true">✓</span> GoTask 擅长</h3>
+          <ul>
+            <li>服务内任务树与父子关系建模</li>
+            <li>协作式停止、优雅关闭与资源回收</li>
+            <li>失败重试、panic 兜底与可观测性</li>
+            <li>把散落的 goroutine 收进统一治理模型</li>
+          </ul>
+        </div>
+        <div class="boundary-card boundary-card--no reveal">
+          <h3><span aria-hidden="true">×</span> 需要明确的能力边界</h3>
+          <ul>
+            <li>Stop() 只取消 Context，无法强杀忽略信号的 goroutine</li>
+            <li>无任务级内存 / 故障隔离，无精确 CPU 配额与硬实时</li>
+            <li>无透明热替换代码；持久化队列请选 asynq / river</li>
+            <li>历史落库由 Dashboard 示例实现，非核心库内置</li>
+          </ul>
+        </div>
+      </div>
+      <p class="boundary-note reveal">若把目标定义为「在单进程内模拟具有强杀、强隔离、精确资源控制的操作系统」，那是 Go 运行时与地址空间模型的硬边界；需要强杀时，应把任务放入独立进程交由 supervisor 管理。</p>
+    </div>
+  </section>
+
+  <!-- ============ CTA ============ -->
+  <section class="cta-band">
+    <div class="container cta-inner reveal">
+      <div>
+        <span class="kicker">READY TO BUILD</span>
+        <h2>把混乱的 goroutine<br>收进一棵<span class="grad">任务树</span></h2>
+        <p>零第三方依赖、MIT 协议、中英双语文档与 10 课渐进式教程。</p>
+      </div>
+      <div class="cta-actions">
+        <a class="btn btn-primary btn-lg" href="https://github.com/langhuihui/gotask" target="_blank" rel="noopener noreferrer">前往 GitHub <span aria-hidden="true">↗</span></a>
+        <div class="install install--cta">
+          <span class="install-prompt">$</span>
+          <code>go get github.com/langhuihui/gotask</code>
+          <button class="copy-btn" type="button" data-copy="go get github.com/langhuihui/gotask" aria-label="复制安装命令">复制</button>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="container footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="#home"><span class="brand-mark"><img src="assets/logo.png" alt=""></span><span class="brand-name">Go<span>Task</span></span></a>
+      <p>Go 的进程内任务生命周期内核。<br>让每一个任务都有始有终。</p>
+    </div>
+    <div class="footer-col">
+      <h4>文档</h4>
+      <a href="https://github.com/langhuihui/gotask#readme" target="_blank" rel="noopener noreferrer">README</a>
+      <a href="https://github.com/langhuihui/gotask/blob/main/README_CN.md" target="_blank" rel="noopener noreferrer">中文文档</a>
+      <a href="https://pkg.go.dev/github.com/langhuihui/gotask" target="_blank" rel="noopener noreferrer">GoDoc API</a>
+      <a href="https://github.com/langhuihui/gotask/tree/main/lessons_CN" target="_blank" rel="noopener noreferrer">十课教程</a>
+    </div>
+    <div class="footer-col">
+      <h4>项目</h4>
+      <a href="https://github.com/langhuihui/gotask" target="_blank" rel="noopener noreferrer">源码仓库</a>
+      <a href="https://github.com/langhuihui/gotask/issues" target="_blank" rel="noopener noreferrer">Issues</a>
+      <a href="https://github.com/langhuihui/gotask/discussions" target="_blank" rel="noopener noreferrer">Discussions</a>
+      <a href="https://goreportcard.com/report/github.com/langhuihui/gotask" target="_blank" rel="noopener noreferrer">Go Report Card</a>
+    </div>
+    <div class="footer-col">
+      <h4>生态</h4>
+      <a href="https://github.com/langhuihui/gotask/tree/main/dashboard" target="_blank" rel="noopener noreferrer">Dashboard</a>
+      <a href="https://github.com/langhuihui/gotask/tree/main/ai_rules" target="_blank" rel="noopener noreferrer">AI IDE 规则</a>
+      <a href="https://github.com/langhuihui/gotask/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">MIT License</a>
+      <a href="https://github.com/langhuihui/gotask/blob/main/event_loop_sequence.md" target="_blank" rel="noopener noreferrer">事件循环时序图</a>
+    </div>
+  </div>
+  <div class="container footer-bottom">
+    <span>© 2025 GoTask · 基于 MIT 协议开源</span>
+    <span>Built with Go 1.23 · 零第三方依赖</span>
+  </div>
+</footer>
+
+<button class="to-top" id="toTop" type="button" aria-label="回到顶部">↑</button>
+
+<script src="main.js" defer></script>
+<script src="demos.js" defer></script>
+</body>
+</html>
